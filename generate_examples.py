@@ -1,4 +1,4 @@
-from json import load
+import json
 from xml.etree.ElementPath import find
 import numpy as np
 import torch
@@ -16,6 +16,14 @@ def find_all(word, sent):
             indexex.append(i)
     return indexex
 
+
+def write_dict_to_json(dict,fname):
+    with open(fname, "w") as outfile:
+        json.dump(dict, outfile)
+
+def read_dict_from_json(fname):
+    with open(fname) as json_file:
+        return json.load(json_file)
 
 class ExamplesGenerator:
     def __init__(self, dataset_name='nthngdy/oscar-mini', dataset_subset_name=''):
@@ -72,13 +80,26 @@ class ExamplesGenerator:
                 word_indexes = find_all(c_word, sentence)
                 # iterate over all the word appearances in the sen:
                 for index in word_indexes: 
-                    if c_word in self.word_to_senteces and index in self.word_to_senteces[c_word]:
+                    if c_word in self.word_to_senteces:
+                        if index in self.word_to_senteces[c_word]:
                             self.word_to_senteces[c_word][index].append(sentence)
-                            continue
-                    #needs to create a new dict for the word index
-                    self.word_to_senteces[c_word]={index:[sentence]}
-                    #self.word_to_senteces[c_word][index]=sentence
-                    
+                        else:
+                            #needs to create a list to the sentences in this index:
+                            self.word_to_senteces[c_word][index]=[sentence]
+                    else:
+                        #needs to create a new dict for the word index
+                        self.word_to_senteces[c_word]={index:[sentence]}
+
+
+    def create_json_from_most_common(self,n):
+        self.split_to_sentences()
+        self.find_n_most_frequent(n)
+        self.print_in_format('writing n_most_frq:')
+        write_dict_to_json(self.n_most_freq,'n_most_frq')
+        self.print_in_format('writing word_to_sen_dict:')
+        self.create_dict_of_most_common()
+        write_dict_to_json(self.word_to_senteces,'word_to_sen_dict')
+
 
     @staticmethod
     def print_in_format(string_to_print):
@@ -89,9 +110,7 @@ class ExamplesGenerator:
 
 if __name__ == "__main__":
     examples_generator = ExamplesGenerator(dataset_name='nthngdy/oscar-mini', dataset_subset_name='unshuffled_original_en')
-    examples_generator.split_to_sentences()
-    print(examples_generator.find_n_most_frequent(20))
-    examples_generator.create_dict_of_most_common()
+    examples_generator.create_json_from_most_common(2)
     examples_generator.print_in_format('finished')
 
 
