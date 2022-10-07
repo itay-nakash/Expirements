@@ -1,5 +1,6 @@
 import json
 from xml.etree.ElementPath import find
+from transformers import PreTrainedTokenizer
 import numpy as np
 import torch
 from datasets import load_dataset
@@ -60,6 +61,12 @@ class ExamplesGenerator:
             self.sentences_list += example_sentences
         ExamplesGenerator.print_in_format(f"Finished generating exampels, you have generated {len(self.sentences_list)} sentences")
 
+
+    def tokenize_sentences(self):
+        tokenizer = PreTrainedTokenizer.from_pretrained('roberta-base') #has bug - to fix
+        tokens = [tokenizer.convert_ids_to_tokens(_ids) for _ids in tokenizer(self.sentences_list)['input_ids']]
+        print('finished tokenize sentences')
+
     # return the n most frequent words in a the dataset sentences    
     def find_n_most_frequent(self,n):
         #concatenate string to use split easily
@@ -73,7 +80,7 @@ class ExamplesGenerator:
 
     def create_dict_of_most_common(self):
 
-        for sentence in self.sentences_list:
+        for i,sentence in enumerate(self.sentences_list):
             #check for each common word if its in the sentece:
             for c_tup in self.n_most_freq:
                 c_word = c_tup[0]
@@ -82,17 +89,20 @@ class ExamplesGenerator:
                 for index in word_indexes: 
                     if c_word in self.word_to_senteces:
                         if index in self.word_to_senteces[c_word]:
-                            self.word_to_senteces[c_word][index].append(sentence)
+                            self.word_to_senteces[c_word][index].append(i)
                         else:
                             #needs to create a list to the sentences in this index:
-                            self.word_to_senteces[c_word][index]=[sentence]
+                            self.word_to_senteces[c_word][index]=[i]
                     else:
                         #needs to create a new dict for the word index
-                        self.word_to_senteces[c_word]={index:[sentence]}
+                        self.word_to_senteces[c_word]={index:[i]}
 
+    def remove_k_most_common(self,k):
+        self.n_most_freq = self.n_most_freq[k:]
 
     def create_json_from_most_common(self,n):
         self.split_to_sentences()
+        self.tokenize_sentences()
         self.find_n_most_frequent(n)
         self.print_in_format('writing n_most_frq:')
         write_dict_to_json(self.n_most_freq,'n_most_frq')
@@ -109,9 +119,17 @@ class ExamplesGenerator:
 
 
 if __name__ == "__main__":
+    #examples_generator = ExamplesGenerator(dataset_name='nthngdy/oscar-mini', dataset_subset_name='unshuffled_original_en')
+    #examples_generator.create_json_from_most_common(1000)
+    #examples_generator.print_in_format('finished')
+
     examples_generator = ExamplesGenerator(dataset_name='nthngdy/oscar-mini', dataset_subset_name='unshuffled_original_en')
-    examples_generator.create_json_from_most_common(2)
-    examples_generator.print_in_format('finished')
+    examples_generator.split_to_sentences()
+    examples_generator.find_n_most_frequent(1000)
+    examples_generator.remove_k_most_common(200)
+    examples_generator.create_dict_of_most_common()
+    print(examples_generator.n_most_freq)
+
 
 
 # TODO:
