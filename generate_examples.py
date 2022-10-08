@@ -68,7 +68,7 @@ class ExamplesGenerator:
         print('finished tokenize sentences')
 
     # return the n most frequent words in a the dataset sentences    
-    def find_n_most_frequent(self,n):
+    def find_n_to_k_most_frequent(self,n,k):
         #concatenate string to use split easily
         concatenated_string=' '.join(self.sentences_list)
         # split to words list for Counter
@@ -76,6 +76,7 @@ class ExamplesGenerator:
         counter = Counter(words_list)
         
         self.n_most_freq = counter.most_common(n)
+        self.n_most_freq = self.n_most_freq[k:]
         ExamplesGenerator.print_in_format(f"{n} most frequent strings are: {self.n_most_freq}")
 
     def create_dict_of_most_common(self):
@@ -97,14 +98,11 @@ class ExamplesGenerator:
                         #needs to create a new dict for the word index
                         self.word_to_senteces[c_word]={index:[i]}
 
-    def remove_k_most_common(self,k):
-        self.n_most_freq = self.n_most_freq[k:]
-
-    def create_json_from_most_common(self,n):
+    def create_json_from_most_common(self,n,k):
         self.split_to_sentences()
-        self.tokenize_sentences()
-        self.find_n_most_frequent(n)
-        self.print_in_format('writing n_most_frq:')
+    #    self.tokenize_sentences() need to fix
+        self.find_n_to_k_most_frequent(n,k)
+        self.print_in_format('writing n_to_k_most_frq:')
         write_dict_to_json(self.n_most_freq,'n_most_frq')
         self.print_in_format('writing word_to_sen_dict:')
         self.create_dict_of_most_common()
@@ -124,12 +122,7 @@ if __name__ == "__main__":
     #examples_generator.print_in_format('finished')
 
     examples_generator = ExamplesGenerator(dataset_name='nthngdy/oscar-mini', dataset_subset_name='unshuffled_original_en')
-    examples_generator.split_to_sentences()
-    examples_generator.find_n_most_frequent(1000)
-    examples_generator.remove_k_most_common(200)
-    examples_generator.create_dict_of_most_common()
-    print(examples_generator.n_most_freq)
-
+    examples_generator.create_json_from_most_common(1000,300)
 
 
 # TODO:
