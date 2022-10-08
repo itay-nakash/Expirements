@@ -100,6 +100,7 @@ class ExamplesGenerator:
 
     def create_json_from_most_common(self,n,k):
         self.split_to_sentences()
+        write_dict_to_json(self.sentences_list)
     #    self.tokenize_sentences() need to fix
         self.find_n_to_k_most_frequent(n,k)
         self.print_in_format('writing n_to_k_most_frq:')
@@ -122,7 +123,9 @@ if __name__ == "__main__":
     #examples_generator.print_in_format('finished')
 
     examples_generator = ExamplesGenerator(dataset_name='nthngdy/oscar-mini', dataset_subset_name='unshuffled_original_en')
-    examples_generator.create_json_from_most_common(1000,300)
+    examples_generator.split_to_sentences()
+    write_dict_to_json(examples_generator.sentences_list,'sentences_list')
+
 
 
 # TODO:
