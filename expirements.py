@@ -27,9 +27,8 @@ def cosine_similarity(tensor1: Tensor, tensor2: Tensor, eps: float = 1e-8):
 
 
 # states[0].shpae = (batch,tokens,hidden_d)
-def remove_incorrect(states: Tensor, logits: Tensor,mask_index:int, masked_word: str) -> Tensor:
+def remove_incorrect(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tensor:
     # get to token_id of the masked token:
-    masked_tokenid=tokenizer.convert_tokens_to_ids(masked_word)
     # get the predicted token_id of each sen:
     arg_max_tensor=logits[:,mask_index].argmax(dim=-1)
     
@@ -50,9 +49,12 @@ def remove_incorrect(states: Tensor, logits: Tensor,mask_index:int, masked_word:
         new_states.append(torch.index_select(state,0,torch.tensor(list_of_indices)))
     return tuple(new_states)
 
-def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_word: str, only_correct_flag :bool = False) -> Tuple[Tensor,Tensor,int]:
+def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_word: str, only_correct_flag :bool = False) -> Tuple[Tensor,Tensor,float,int]:
     # convert the sentences list to input_ids:
     input_ids = [tokenizer.convert_tokens_to_ids(sentence) for sentence in senteneces]
+    # convert the token str to token_id:
+    masked_tokenid=tokenizer.convert_tokens_to_ids(masked_word)
+    
     #add padding:
     input_ids_padded = tokenizer(tokenizer.batch_decode(input_ids), add_special_tokens=False, padding=True, return_tensors="pt")
     size = input_ids_padded.input_ids.shape
@@ -61,11 +63,12 @@ def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_
     # states[0].shape = (batch,tokens,hidden_d) (dim of each state, we have 13 states as number of layers)
     states = outputs['hidden_states']
     logits = outputs['logits']
-    
     if only_correct_flag:
-        states = remove_incorrect(states,logits,mask_index,masked_word)
+        states = remove_incorrect(states,logits,mask_index,masked_tokenid)
 
-
+    #calculated to all enries, not just correct ones:
+    masked_token_logits_list=[logits[:,mask_index,:][i][masked_tokenid].item() for i in range(logits.shape[0])]
+    mean_logic_on_masked=sum(masked_token_logits_list)/len(masked_token_logits_list)
     mean_sims = []
     std_sims=[]
     num_of_examples = 0
@@ -81,7 +84,7 @@ def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_
         mean_sims.append(np.mean(sims))
         std_sims.append(np.std(sims))
 
-    return mean_sims,std_sims,num_of_examples
+    return mean_sims,std_sims,mean_logic_on_masked,num_of_examples
 
 def get_mask_features(sentence:str, position=None):
     model.eval()
@@ -109,36 +112,26 @@ def mask_word(sentence,location):
     return sentence
 
 
-def create_table_from_correct(words):
+def create_table_from_results(words, only_correct_flag :bool = False):
     results = []
     for word in words:
         for mask_loc in words[word]:
             current_sentences=[mask_word(sentences_list[i],int(mask_loc)) for i in words[word][mask_loc]]
             if len(current_sentences) < MIN_NUM_OF_SEN:
                 continue    
-            sims, stds, n = find_batch_similarities(current_sentences,int(mask_loc),word, True)
+            sims, stds, mean_logic_on_masked ,n= find_batch_similarities(current_sentences,int(mask_loc),word, only_correct_flag)
             # added a minor fix, since I remove the incorrect examples in find_batch_similarities, I want to check again that its enough examples
             # before I write it down. if not, just continue and dont save it.
             if n < MIN_NUM_OF_SEN:
                 continue
             print(f'word: {word}, index: {mask_loc}, examples: {n}')
             for layer, (sim, std) in enumerate(zip(sims, stds)):
-                results.append({'word': word, 'index': mask_loc, 'layer': layer, 'examples': n, 'similarity': sim, 'std': std})
+                results.append({'word': word, 'index': mask_loc, 'layer': layer, 'examples': n, 'similarity': sim,'mean logic':mean_logic_on_masked, 'std': std})
     df = pd.DataFrame(results)
-    df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result_only_correct_predict.csv', index=False)    
-
-def create_table_from_all_results(words):
-    results = []
-    for word in words:
-        for mask_loc in words[word]:
-            current_sentences=[mask_word(sentences_list[i],int(mask_loc)) for i in words[word][mask_loc]]
-            if len(current_sentences) < MIN_NUM_OF_SEN:
-                continue    
-            sims, stds, n = find_batch_similarities(current_sentences,int(mask_loc),word)
-            for layer, (sim, std) in enumerate(zip(sims, stds)):
-                results.append({'word': word, 'index': mask_loc, 'layer': layer, 'examples': n, 'similarity': sim, 'std': std})
-    df = pd.DataFrame(results)
-    df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result_all.csv', index=False)    
+    if only_correct_flag:
+        df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result_only_correct_predict.csv', index=False)    
+    else:
+        df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result_all.csv', index=False)    
 
 
 if __name__ == "__main__":
@@ -151,4 +144,5 @@ if __name__ == "__main__":
     #current_sentences=[mask_word(sentences_list[index],z2) for index in word_to_sen['Ġmust']['2']]    
     #get_batch_mean_similarity(current_sentences,2)
 
-    create_table_from_correct(word_to_sen)
+    create_table_from_results(word_to_sen,True)
+    create_table_from_results(word_to_sen,False)
