@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import torch.nn.functional as F
 from typing import List,Dict,Set,Union,Optional,Tuple,Any
-from torch import Tensor
+from torch import Tensor, logit
 from transformers import pipeline, AutoTokenizer, AutoModelForMaskedLM
 
 tokenizer = AutoTokenizer.from_pretrained("roberta-base")
@@ -27,29 +27,21 @@ def cosine_similarity(tensor1: Tensor, tensor2: Tensor, eps: float = 1e-8):
 
 
 # states[0].shpae = (batch,tokens,hidden_d)
-def remove_incorrect(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tensor:
+#returns states of only correct and only incorrect predicted by model
+def seperate_correct_and_incorrect(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tuple[Tensor]:
     # get to token_id of the masked token:
     # get the predicted token_id of each sen:
     arg_max_tensor=logits[:,mask_index].argmax(dim=-1)
+    correct_mask = arg_max_tensor==masked_tokenid
+    incorrect_mask=arg_max_tensor!=masked_tokenid
+    states_correct= tuple([state[correct_mask] for state in states])
+    states_incorrect= tuple([state[incorrect_mask] for state in states])
+    logits_correct= logits[correct_mask]
+    logits_incorrect= logits[incorrect_mask]
     
-    #create tensors for conditions:
-    ones_tensor = torch.ones_like(arg_max_tensor)
-    zeros_tensor = torch.zeros_like(arg_max_tensor)
+    return states_correct, states_incorrect,logits_correct,logits_incorrect
 
-    # I probably wrote it pretty bad and messy, might check about it in the future  
-    logits_mod = torch.where(logits[:,mask_index].argmax(dim=-1)==masked_tokenid,ones_tensor,zeros_tensor)
-    indices=logits_mod.nonzero()
-    new_states=[]
-    #indices is a list of a list of indices, so I need to merge them to one list:
-    list_of_indices=list(itertools.chain.from_iterable(indices))
-    #if it empty, return an empty tuple:
-    if list_of_indices==[]:
-        return tuple()
-    for state in states:
-        new_states.append(torch.index_select(state,0,torch.tensor(list_of_indices)))
-    return tuple(new_states)
-
-def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_word: str, only_correct_flag :bool = False) -> Tuple[Tensor,Tensor,float,int]:
+def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_word: str):
     # convert the sentences list to input_ids:
     input_ids = [tokenizer.convert_tokens_to_ids(sentence) for sentence in senteneces]
     # convert the token str to token_id:
@@ -57,23 +49,31 @@ def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_
     
     #add padding:
     input_ids_padded = tokenizer(tokenizer.batch_decode(input_ids), add_special_tokens=False, padding=True, return_tensors="pt")
-    size = input_ids_padded.input_ids.shape
     with torch.no_grad():
         outputs = model(**input_ids_padded, output_hidden_states=True)
-    # states[0].shape = (batch,tokens,hidden_d) (dim of each state, we have 13 states as number of layers)
+    # states[0].shape = (batch,tokens,hidden_d) - dim of each state, we have 13 states as number of layers
     states = outputs['hidden_states']
     logits = outputs['logits']
-    if only_correct_flag:
-        states = remove_incorrect(states,logits,mask_index,masked_tokenid)
+    corrent_states, incorrect_states,logits_c,logits_nc = seperate_correct_and_incorrect(states,logits,mask_index,masked_tokenid)
 
-    #calculated to all enries, not just correct ones:
-    masked_token_logits_list=[logits[:,mask_index,:][i][masked_tokenid].item() for i in range(logits.shape[0])]
-    mean_logic_on_masked=sum(masked_token_logits_list)/len(masked_token_logits_list)
+    #TODO: edit the logits too
+    softmax_logits_c=torch.softmax(logits_c,dim=-1)
+    softmax_logits_nc=torch.softmax(logits_nc,dim=-1)
+
+    softmax_logits_c_mean=softmax_logits_c[:,mask_index,masked_tokenid].mean().item()
+    softmax_logits_nc_mean=softmax_logits_nc[:,mask_index,masked_tokenid].mean().item()
+    correct_mean_sims, correct_std_sims,correct_num_of_examples =calculte_means_on_states(corrent_states,mask_index)
+    incorrect_mean_sims, incorrect_std_sims,incorrect_num_of_examples=calculte_means_on_states(incorrect_states,mask_index)
+
+
+    return correct_mean_sims,incorrect_mean_sims,correct_std_sims,incorrect_std_sims,correct_num_of_examples,incorrect_num_of_examples,softmax_logits_c_mean,softmax_logits_nc_mean
+
+
+def calculte_means_on_states(states: Tensor,mask_index: int) -> Tuple[Tensor,Tensor,int]:
     mean_sims = []
     std_sims=[]
     num_of_examples = 0
     for state in states:
-        # its here since we dont want to check it if state is an empty tuple: 
         num_of_examples = state.shape[0]
         # state.shape = (batch,hidden_d)
         state = state[:,mask_index,:]
@@ -84,7 +84,10 @@ def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_
         mean_sims.append(np.mean(sims))
         std_sims.append(np.std(sims))
 
-    return mean_sims,std_sims,mean_logic_on_masked,num_of_examples
+
+    return mean_sims,std_sims,num_of_examples
+
+
 
 def get_mask_features(sentence:str, position=None):
     model.eval()
@@ -112,26 +115,21 @@ def mask_word(sentence,location):
     return sentence
 
 
-def create_table_from_results(words, only_correct_flag :bool = False):
+def create_table_from_results(words):
     results = []
     for word in words:
         for mask_loc in words[word]:
             current_sentences=[mask_word(sentences_list[i],int(mask_loc)) for i in words[word][mask_loc]]
-            if len(current_sentences) < MIN_NUM_OF_SEN:
-                continue    
-            sims, stds, mean_logic_on_masked ,n= find_batch_similarities(current_sentences,int(mask_loc),word, only_correct_flag)
-            # added a minor fix, since I remove the incorrect examples in find_batch_similarities, I want to check again that its enough examples
-            # before I write it down. if not, just continue and dont save it.
-            if n < MIN_NUM_OF_SEN:
+            sims_c,sims_nc, stds_c,stds_nc ,num_of_examples_c,num_of_examples_nc,softmax_logits_c_mean,softmax_logits_nc_mean= find_batch_similarities(current_sentences,int(mask_loc),word)
+
+            if num_of_examples_c < MIN_NUM_OF_SEN and num_of_examples_nc < MIN_NUM_OF_SEN:
                 continue
-            print(f'word: {word}, index: {mask_loc}, examples: {n}')
-            for layer, (sim, std) in enumerate(zip(sims, stds)):
-                results.append({'word': word, 'index': mask_loc, 'layer': layer, 'examples': n, 'similarity': sim,'mean logic':mean_logic_on_masked, 'std': std})
+            print(f'new func: word: {word}, index: {mask_loc}, examples_c: {num_of_examples_c},examples_nc:{num_of_examples_nc}')
+            for layer, (sim_c, std_c,sim_nc, std_nc) in enumerate(zip(sims_c, stds_c,sims_nc, stds_nc)):
+                results.append({'word': word, 'index': mask_loc, 'layer': layer, 'examples': num_of_examples_c, 'similarity': sim_c,'mean softmax':softmax_logits_c_mean, 'std': std_c, 'predicted correct': 1})
+                results.append({'word': word, 'index': mask_loc, 'layer': layer, 'examples': num_of_examples_nc, 'similarity': sim_nc,'mean softmax':softmax_logits_nc_mean, 'std': std_nc,'predicted correct': 0})
     df = pd.DataFrame(results)
-    if only_correct_flag:
-        df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result_only_correct_predict.csv', index=False)    
-    else:
-        df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result_all.csv', index=False)    
+    df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result.csv', index=False)    
 
 
 if __name__ == "__main__":
@@ -144,5 +142,4 @@ if __name__ == "__main__":
     #current_sentences=[mask_word(sentences_list[index],z2) for index in word_to_sen['Ġmust']['2']]    
     #get_batch_mean_similarity(current_sentences,2)
 
-    create_table_from_results(word_to_sen,True)
-    create_table_from_results(word_to_sen,False)
+    create_table_from_results(word_to_sen)
