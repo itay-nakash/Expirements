@@ -27,8 +27,8 @@ def cosine_similarity(tensor1: Tensor, tensor2: Tensor, eps: float = 1e-8):
 
 
 # states[0].shpae = (batch,tokens,hidden_d)
-#returns states of only correct and only incorrect predicted by model
-def seperate_correct_and_incorrect(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tuple[Tensor]:
+# returns states of only correct and only incorrect predicted by model
+def seperate_correct_incorrect_predict(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tuple[Tensor]:
     # get to token_id of the masked token:
     # get the predicted token_id of each sen:
     arg_max_tensor=logits[:,mask_index].argmax(dim=-1)
@@ -37,9 +37,17 @@ def seperate_correct_and_incorrect(states: Tensor, logits: Tensor,mask_index:int
     states_correct= tuple([state[correct_mask] for state in states])
     states_incorrect= tuple([state[incorrect_mask] for state in states])
     logits_correct= logits[correct_mask]
-    logits_incorrect= logits[incorrect_mask]
-    
-    return states_correct, states_incorrect,logits_correct,logits_incorrect
+    # returns the logits on all the tokens, just on sentences predicted incorrect
+    logits_incorrect_all= logits[incorrect_mask]
+    # returns the values of logits on the (wrong token) in sentences that was predicted incorrect
+    predicted_tokens_in_incorrect = arg_max_tensor[incorrect_mask]
+    logits_of_predicted_token_incorrect= logits_incorrect_all[:,mask_index,predicted_tokens_in_incorrect]
+    # TODO: find an efficieent way todo so:
+    # keep just the wanted indeses, so at each entry - tell it to keep just the index of the entry:
+    #logits_of_predicted_token_incorrect = logits_of_predicted_token_incorrect[:,torch.arange(0,predicted_tokens_in_incorrect.shape[0],1)]
+    logits_of_predicted_token_incorrect = torch.FloatTensor([logits_of_predicted_token_incorrect[x,x] for x in range(logits_of_predicted_token_incorrect.shape[0])])
+
+    return states_correct, states_incorrect,logits_correct,logits_incorrect_all,logits_of_predicted_token_incorrect
 
 def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_word: str):
     # convert the sentences list to input_ids:
@@ -53,10 +61,11 @@ def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_
         outputs = model(**input_ids_padded, output_hidden_states=True)
     # states[0].shape = (batch,tokens,hidden_d) - dim of each state, we have 13 states as number of layers
     states = outputs['hidden_states']
+    # logits.shpae = (batch,tokens,voc_size)
     logits = outputs['logits']
-    corrent_states, incorrect_states,logits_c,logits_nc = seperate_correct_and_incorrect(states,logits,mask_index,masked_tokenid)
+    corrent_states, incorrect_states,logits_c,logits_nc,logits_nc_for_ptokens = seperate_correct_incorrect_predict(states,logits,mask_index,masked_tokenid)
 
-    #TODO: edit the logits too
+    #TODO seperate_correct_incorrect_predict edit the logits too
     softmax_logits_c=torch.softmax(logits_c,dim=-1)
     softmax_logits_nc=torch.softmax(logits_nc,dim=-1)
 
@@ -67,7 +76,6 @@ def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_
 
 
     return correct_mean_sims,incorrect_mean_sims,correct_std_sims,incorrect_std_sims,correct_num_of_examples,incorrect_num_of_examples,softmax_logits_c_mean,softmax_logits_nc_mean
-
 
 def calculte_means_on_states(states: Tensor,mask_index: int) -> Tuple[Tensor,Tensor,int]:
     mean_sims = []
@@ -86,7 +94,6 @@ def calculte_means_on_states(states: Tensor,mask_index: int) -> Tuple[Tensor,Ten
 
 
     return mean_sims,std_sims,num_of_examples
-
 
 
 def get_mask_features(sentence:str, position=None):
@@ -114,7 +121,6 @@ def mask_word(sentence,location):
     sentence[location]=tokenizer.mask_token
     return sentence
 
-
 def create_table_from_results(words):
     results = []
     for word in words:
@@ -137,9 +143,4 @@ if __name__ == "__main__":
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
     
-    #sentence1= sentences_list[word_to_sen['Ġmust']['2'][0]]    
-    #sentence2= sentences_list[word_to_sen['Ġmust']['2'][1]]
-    #current_sentences=[mask_word(sentences_list[index],z2) for index in word_to_sen['Ġmust']['2']]    
-    #get_batch_mean_similarity(current_sentences,2)
-
     create_table_from_results(word_to_sen)
