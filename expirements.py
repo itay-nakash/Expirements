@@ -54,42 +54,78 @@ def seperate_correct_incorrect_predict(states: Tensor, logits: Tensor,mask_index
 
     return states_correct, states_incorrect,logits_correct,logits_incorrect_all,logits_of_predicted_token_incorrect
 
-def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_word: str):
+#TODO: add desc of what it returns:
+def convert_sentences_list_to_model_input(senteneces: List[List[str]]):
     # convert the sentences list to input_ids:
     input_ids = [tokenizer.convert_tokens_to_ids(sentence) for sentence in senteneces]
+    #add padding:
+    input_ids_padded = tokenizer(tokenizer.batch_decode(input_ids), add_special_tokens=False, padding=True, return_tensors="pt")
+    return input_ids_padded
+
+
+def compare_layers_similarities(senteneces: List[List[str]],mask_loc: int, masked_word: str):
+    input_ids_padded = convert_sentences_list_to_model_input(senteneces)
+
+    with torch.no_grad():
+        outputs = model(**input_ids_padded, output_hidden_states=True)
+
+    # states[0].shape = (batch,tokens,hidden_d) - dim of each state, we have 13 states as number of layers
+    states = outputs['hidden_states']
+    # logits.shpae = (batch,tokens,voc_size)
+    # logits = outputs['logits']
+    cos_s=torch.nn.CosineSimilarity(dim=0)
+    for i,state1 in enumerate(states):
+        for j,state2 in enumerate(states):
+            # run only on pairs that j<i - so we run once on each:
+            if j<i:
+                for k in range(state1.shape[0]):
+                    sim = cos_s(state1[k],state2[k])
+                    sim = sim.cpu().numpy()
+                    
+                    # mean over all the hidden-states dimentions:
+                    mean_sim = np.mean(sim)
+                    print(f'the cos_s between layre {i} and layer {j} in the {k}\'s sen is: {mean_sim}')
+
+
+
+def find_batch_similarities(senteneces: List[List[str]],mask_loc: int, masked_word: str):
     # convert the token str to token_id:
     masked_tokenid=tokenizer.convert_tokens_to_ids(masked_word)
     
-    #add padding:
-    input_ids_padded = tokenizer(tokenizer.batch_decode(input_ids), add_special_tokens=False, padding=True, return_tensors="pt")
+    input_ids_padded = convert_sentences_list_to_model_input(senteneces)
+
     with torch.no_grad():
         outputs = model(**input_ids_padded, output_hidden_states=True)
     # states[0].shape = (batch,tokens,hidden_d) - dim of each state, we have 13 states as number of layers
     states = outputs['hidden_states']
     # logits.shpae = (batch,tokens,voc_size)
     logits = outputs['logits']
-    corrent_states, incorrect_states,logits_c,logits_nc_org_tok,logits_nc_for_pred_tok = seperate_correct_incorrect_predict(states,logits,mask_index,masked_tokenid)
+    corrent_states, incorrect_states,logits_c,\
+    logits_nc_org_tok,logits_nc_for_pred_tok = seperate_correct_incorrect_predict(states,logits,mask_loc,masked_tokenid)
 
     #TODO seperate_correct_incorrect_predict edit the logits too
     softmax_logits_c=torch.softmax(logits_c,dim=-1)
     softmax_logits_nc=torch.softmax(logits_nc_org_tok,dim=-1)
+    softmax_logits_nc_for_pred_tok=torch.softmax(logits_nc_for_pred_tok,dim=-1)
 
-    softmax_logits_c_mean=softmax_logits_c[:,mask_index,masked_tokenid].mean().item()
-    softmax_logits_nc_mean=softmax_logits_nc[:,mask_index,masked_tokenid].mean().item()
-    correct_mean_sims, correct_std_sims,correct_num_of_examples =calculte_means_on_states(corrent_states,mask_index)
-    incorrect_mean_sims, incorrect_std_sims,incorrect_num_of_examples=calculte_means_on_states(incorrect_states,mask_index)
+    softmax_logits_c_mean=softmax_logits_c[:,mask_loc,masked_tokenid].mean().item()
+    softmax_logits_nc_mean=softmax_logits_nc[:,mask_loc,masked_tokenid].mean().item()
+    correct_mean_sims, correct_std_sims,correct_num_of_examples =calculte_stats_on_states(corrent_states,mask_loc)
+    incorrect_mean_sims, incorrect_std_sims,incorrect_num_of_examples=calculte_stats_on_states(incorrect_states,mask_loc)
 
 
-    return correct_mean_sims,incorrect_mean_sims,correct_std_sims,incorrect_std_sims,correct_num_of_examples,incorrect_num_of_examples,softmax_logits_c_mean,softmax_logits_nc_mean
+    return correct_mean_sims,incorrect_mean_sims,correct_std_sims,incorrect_std_sims,\
+        correct_num_of_examples,incorrect_num_of_examples,softmax_logits_c_mean,\
+            softmax_logits_nc_mean,softmax_logits_nc_for_pred_tok
 
-def calculte_means_on_states(states: Tensor,mask_index: int) -> Tuple[Tensor,Tensor,int]:
+def calculte_stats_on_states(states: Tensor,mask_loc: int) -> Tuple[Tensor,Tensor,int]:
     mean_sims = []
     std_sims=[]
     num_of_examples = 0
     for state in states:
         num_of_examples = state.shape[0]
         # state.shape = (batch,hidden_d)
-        state = state[:,mask_index,:]
+        state = state[:,mask_loc,:]
         # sims.shpae = (batch,batch)
         sims = cosine_similarity(state, state)
         sims = sims.cpu().numpy()
@@ -104,16 +140,16 @@ def calculte_means_on_states(states: Tensor,mask_index: int) -> Tuple[Tensor,Ten
 def get_mask_features(sentence:str, position=None):
     model.eval()
     inputs = tokenizer(sentence, return_tensors="pt")
-    mask_index = int(torch.where(inputs.input_ids == tokenizer.mask_token_id)[1])
+    mask_loc = int(torch.where(inputs.input_ids == tokenizer.mask_token_id)[1])
 
     if position is None:
-        position = mask_index
+        position = mask_loc
 
     outputs = model(**inputs, output_hidden_states=True)
     states = list(outputs.hidden_states) + [outputs.logits]
     hidden_states = [state[:, position].view(-1) for state in states]
     # print the predicted word
-    predicted_word = tokenizer.decode(outputs.logits[:,mask_index].argmax(dim=-1)[0])
+    predicted_word = tokenizer.decode(outputs.logits[:,mask_loc].argmax(dim=-1)[0])
     return predicted_word, hidden_states
 
 def compare_dists(sentence1,sentence2):
@@ -126,12 +162,14 @@ def mask_word(sentence,location):
     sentence[location]=tokenizer.mask_token
     return sentence
 
-def create_table_from_results(words):
+def create_table_from_results(words_dict):
     results = []
-    for word in words:
-        for mask_loc in words[word]:
-            current_sentences=[mask_word(sentences_list[i],int(mask_loc)) for i in words[word][mask_loc]]
-            sims_c,sims_nc, stds_c,stds_nc ,num_of_examples_c,num_of_examples_nc,softmax_logits_c_mean,softmax_logits_nc_mean= find_batch_similarities(current_sentences,int(mask_loc),word)
+    for word in words_dict:
+        for mask_loc in words_dict[word]:
+            current_sentences=[mask_word(sentences_list[i],int(mask_loc)) for i in words_dict[word][mask_loc]]
+            sims_c,sims_nc, stds_c,stds_nc ,num_of_examples_c,\
+            num_of_examples_nc,softmax_logits_c_mean,\
+            softmax_logits_nc_mean,softmax_logits_nc_for_pred_tok = find_batch_similarities(current_sentences,int(mask_loc),word)
 
             if num_of_examples_c < MIN_NUM_OF_SEN and num_of_examples_nc < MIN_NUM_OF_SEN:
                 continue
@@ -142,10 +180,17 @@ def create_table_from_results(words):
     df = pd.DataFrame(results)
     df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result.csv', index=False)    
 
+def compare_layers(words_dict):
+    results = []
+    for word in words_dict:
+        for mask_loc in words_dict[word]:
+            current_sentences=[mask_word(sentences_list[i],int(mask_loc)) for i in words_dict[word][mask_loc]]
+            compare_layers_similarities(current_sentences,mask_loc,word)
 
 if __name__ == "__main__":
     most_freq_words=read_dict_from_json('n_most_frq')
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
-        
-    create_table_from_results(word_to_sen)
+
+    #create_table_from_results(word_to_sen)
+    compare_layers(word_to_sen)
