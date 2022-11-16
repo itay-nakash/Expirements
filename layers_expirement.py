@@ -12,7 +12,6 @@ from transformers import AutoModelForMaskedLM, AutoTokenizer, pipeline
 from expirements_utils import tokenizer, model, convert_sentences_list_to_model_input
 
 from expirements_utils import read_dict_from_json,mask_word
-import similarities_metrics
 
 STATES_NUM=13
 

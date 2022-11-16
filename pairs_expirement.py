@@ -11,8 +11,7 @@ from torch import Tensor, logit
 from transformers import AutoModelForMaskedLM, AutoTokenizer, pipeline
 from expirements_utils import tokenizer, model, convert_sentences_list_to_model_input
 
-from expirements_utils import read_dict_from_json,mask_word
-import similarities_metrics
+from expirements_utils import read_dict_from_json,mask_word,cosine_similarity
 
 MIN_NUM_OF_SEN = 10
 STATES_NUM= 13
@@ -79,7 +78,7 @@ def calculte_stats_on_states(states: Tensor,mask_loc: int) -> Tuple[Tensor,Tenso
         # state.shape = (batch,hidden_d)
         state = state[:,mask_loc,:]
         # sims.shpae = (batch,batch)
-        sims = similarities_metrics.cosine_similarity(state, state)
+        sims = cosine_similarity(state, state)
         sims = sims.cpu().numpy()
         sims = sims[np.triu_indices(sims.shape[0],k=1)]
         mean_sims.append(np.mean(sims))
