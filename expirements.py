@@ -1,13 +1,15 @@
-from calendar import c
-import json
-import torch
 import itertools
-import pandas as pd
+import json
+from calendar import c
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
 import numpy as np
+import pandas as pd
+import torch
 import torch.nn.functional as F
-from typing import List,Dict,Set,Union,Optional,Tuple,Any
+import bert_score
 from torch import Tensor, logit
-from transformers import pipeline, AutoTokenizer, AutoModelForMaskedLM
+from transformers import AutoModelForMaskedLM, AutoTokenizer, pipeline
 
 tokenizer = AutoTokenizer.from_pretrained("roberta-base")
 model = AutoModelForMaskedLM.from_pretrained("roberta-base")
@@ -25,6 +27,9 @@ def cosine_similarity(tensor1: Tensor, tensor2: Tensor, eps: float = 1e-8):
     tensor2_normed = tensor2 / torch.max(tensor2_norm, eps * torch.ones_like(tensor2_norm))
     return torch.mm(tensor1_normed, tensor2_normed.T)
 
+def get_bertscore_between_sent(sentence1: str, sentence2: str):
+    P, R, F1 = bert_score.score([sentence1],[sentence2], lang='en', verbose=True)
+    print('finished')
 
 # states[0].shpae = (batch,tokens,hidden_d)
 # returns states of only correct and only incorrect predicted by model
@@ -63,11 +68,11 @@ def find_batch_similarities(senteneces: List[List[str]],mask_index: int, masked_
     states = outputs['hidden_states']
     # logits.shpae = (batch,tokens,voc_size)
     logits = outputs['logits']
-    corrent_states, incorrect_states,logits_c,logits_nc,logits_nc_for_ptokens = seperate_correct_incorrect_predict(states,logits,mask_index,masked_tokenid)
+    corrent_states, incorrect_states,logits_c,logits_nc_org_tok,logits_nc_for_pred_tok = seperate_correct_incorrect_predict(states,logits,mask_index,masked_tokenid)
 
     #TODO seperate_correct_incorrect_predict edit the logits too
     softmax_logits_c=torch.softmax(logits_c,dim=-1)
-    softmax_logits_nc=torch.softmax(logits_nc,dim=-1)
+    softmax_logits_nc=torch.softmax(logits_nc_org_tok,dim=-1)
 
     softmax_logits_c_mean=softmax_logits_c[:,mask_index,masked_tokenid].mean().item()
     softmax_logits_nc_mean=softmax_logits_nc[:,mask_index,masked_tokenid].mean().item()
@@ -142,5 +147,5 @@ if __name__ == "__main__":
     most_freq_words=read_dict_from_json('n_most_frq')
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
-    
+        
     create_table_from_results(word_to_sen)
