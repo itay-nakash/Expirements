@@ -7,7 +7,7 @@ import itertools
 from datasets import load_dataset
 import nltk
 from collections import Counter
-
+from expirements_utils import write_dict_to_json
 
 
 def find_all_in_list(word, list):
@@ -20,15 +20,6 @@ def find_all_in_string(word, sent):
         if w ==word:
             indexex.append(i)
     return indexex
-
-
-def write_dict_to_json(dict,fname):
-    with open(fname, "w") as outfile:
-        json.dump(dict, outfile)
-
-def read_dict_from_json(fname):
-    with open(fname) as json_file:
-        return json.load(json_file)
 
 class ExamplesGenerator:
     def __init__(self, dataset_name='nthngdy/oscar-mini', dataset_subset_name=''):
