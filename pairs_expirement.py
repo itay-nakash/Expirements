@@ -1,6 +1,7 @@
 import itertools
 from calendar import c
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import random
 
 import numpy as np
 import pandas as pd
@@ -108,14 +109,28 @@ def create_table_from_results(words_dict,sentences_list):
 
 class DifferentIndexExpi:
 
-    def __init__(self,words_dict, indexes_num:int):
+    def __init__(self,words_dict, indexes_sets_size:int):
         # the size of each :
-        self.indexes_num = indexes_num
+        self.indexes_sets_size = indexes_sets_size
         self.words_dict = words_dict
 
-    def choose_subsets(indexes):
-        print('finished')
+    def choose_subsets(self,indexes_group):
+        indexes1=random.sample(indexes_group,self.indexes_sets_size)
+        # remove the choosen indexes - to make sure we dont have the same index in the expirement:
+        indexes_group_new = [x for x in indexes_group if x not in indexes1]
+        indexes2=random.sample(indexes_group_new,self.indexes_sets_size)
+        return indexes1, indexes2
 
+    def create_table_from_results(self,sentences_list):
+        results = []
+        for word in self.words_dict:
+            indexes1,indexes2 = self.choose_subsets(self.words_dict[word].keys())
+            for mask_loc1 in indexes1:
+                current_sentences1=[mask_word(sentences_list[i],int(mask_loc1)) for i in self.words_dict[word][mask_loc1]]
+                for mask_loc2 in indexes2:
+                    current_sentences2=[mask_word(sentences_list[i],int(mask_loc2)) for i in self.words_dict[word][mask_loc2]]
+        df = pd.DataFrame(results)
+        df.to_csv('/home/itay.nakash/projects/smooth_language/expirement_result.csv', index=False)    
 
 
 
