@@ -31,16 +31,6 @@ class Table_Expirement:
         self.words_dict = words_dict
         self.sentences_list = sentences_list
 
-    def sample_original_couple(sen:List,already_been:List):
-        num_of_sampeling=0
-        mask_index1,mask_index2=random.sample(range(0,len(sen)),2)
-        already_been+=[(mask_index1,mask_index2),(mask_index2,mask_index1)]
-        while num_of_sampeling<MAX_ATTEMPTS_RND and (mask_index1,mask_index2) in already_been:
-            mask_index1,mask_index2=random.sample(range(0,len(sen)),2)
-        if num_of_sampeling == MAX_ATTEMPTS_RND:
-            print('got to dobule sen!')
-        return mask_index1,mask_index2,already_been,num_of_sampeling
-
     def get_sen_states(sen: str):
         input_ids_padded=convert_sentences_list_to_model_input([sen])
         with torch.no_grad():
@@ -64,11 +54,9 @@ class Table_Expirement:
             if num_of_sentences<i:
                 break
             sen_len = len(sen)
-            already_been=[]
-            for j in range(NUM_OF_MIXES):
-                mask_index1,mask_index2,already_been,num_of_sampeling=Table_Expirement.sample_original_couple(sen,already_been)
-                if num_of_sampeling==MAX_ATTEMPTS_RND:
-                    break
+            pairs_indexes,current_num_of_mixes = expirements_utils.generate_k_unique_pairs(sen_len,NUM_OF_MIXES)
+            for j in range(current_num_of_mixes):
+                mask_index1,mask_index2=expirements_utils.convert_k_to_pair(pairs_indexes[j])
                 # mask both words:
                 c_sen_mask1,masked_tokenid1=mask_word(c_sen1,int(mask_index1))
                 c_sen_mask2,masked_tokenid2=mask_word(c_sen2,int(mask_index2))
@@ -124,9 +112,129 @@ class Table_Expirement:
             f.write(dfAsString)
 
 
-    def create_same_index_diff_sen_table(self):
+
+class SameIndexExpiTable:
+
+    def seperate_correct_incorrect_predict(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tuple[Tensor]:
+        # get to token_id of the masked token:
+        # get the predicted token_id of each sen:
+        arg_max_tensor=logits[:,mask_index].argmax(dim=-1)
+        correct_mask = arg_max_tensor==masked_tokenid
+        incorrect_mask=arg_max_tensor!=masked_tokenid
+        states_correct= tuple([state[correct_mask] for state in states])
+        states_incorrect= tuple([state[incorrect_mask] for state in states])
+        logits_c= logits[correct_mask]
+        # returns the logits on all the tokens, just on sentences predicted incorrect
+        logits_nc_all= logits[incorrect_mask]
+        # returns the values of logits on the (wrong token) in sentences that was predicted incorrect
+        predicted_tokens_in_incorrect = arg_max_tensor[incorrect_mask]
+        logits_nc_for_pred_tok = torch.FloatTensor([logits_nc_all[i,mask_index,x] for i,x in enumerate(predicted_tokens_in_incorrect)])
+        # TODO: find an efficieent way todo so:
+        #logits_of_predicted_token_incorrect = logits_nc_all[:,mask_index,predicted_tokens_in_incorrect]
+        # keep just the wanted indeses, so at each entry - tell it to keep just the index of the entry:
+        #logits_of_predicted_token_incorrect = logits_of_predicted_token_incorrect[:,torch.arange(0,predicted_tokens_in_incorrect.shape[0],1)]
+        # for debuging, removed it since it is run-time expensive:
+        #for j in range(logits_nc_all.shape[0]):
+        #    assert logits_nc_all[j,mask_index,masked_tokenid]<=logits_of_predicted_token_incorrect[j]
+         # calculate softmax:
+        softmax_logits_c=torch.softmax(logits_c,dim=-1)
+        softmax_logits_nc_all=torch.softmax(logits_nc_all,dim=-1)
+        softmax_logits_nc_masked_tok=torch.softmax(logits_nc_all,dim=-1)[:,mask_index,masked_tokenid]
+        softmax_logits_nc_for_pred_tok = torch.FloatTensor([softmax_logits_nc_all[i,mask_index,x] for i,x in enumerate(predicted_tokens_in_incorrect)])
+
+
+        return states_correct, states_incorrect,logits_c\
+            ,logits_nc_all,logits_nc_for_pred_tok,softmax_logits_c,\
+                softmax_logits_nc_masked_tok,softmax_logits_nc_for_pred_tok
+
+    def find_batch_similarities(senteneces: List[List[str]],mask_loc: int, masked_word: str):
+        # convert the token str to token_id:
+        masked_tokenid=tokenizer.convert_tokens_to_ids(masked_word)
         
-        print('finished')
+        input_ids_padded = convert_sentences_list_to_model_input(senteneces)
+
+        with torch.no_grad():
+            outputs = model(**input_ids_padded, output_hidden_states=True)
+        # states[0].shape = (batch,tokens,hidden_d) - dim of each state, we have 13 states as number of layers
+        states = outputs['hidden_states']
+        # logits.shpae = (batch,tokens,voc_size)
+        logits = outputs['logits']
+        states_c, states_nc,logits_c,\
+        logits_nc_all,logits_nc_for_pred_tok,softmax_logits_c,\
+        softmax_logits_nc_masked_tok,softmax_logits_nc_for_pred_tok = SameIndexExpi.seperate_correct_incorrect_predict(states,logits,mask_loc,masked_tokenid)
+
+        # calculate softmax means:
+        softmax_c_mean=softmax_logits_c[:,mask_loc,masked_tokenid].mean().item()
+        softmax_nc_masked_mean_masked=softmax_logits_nc_masked_tok.mean().item()
+        softmax_nc_for_pred_tok_mean = softmax_logits_nc_for_pred_tok.mean().item()
+
+        # calculate logits means:
+        logits_c_mean = logits_c[:,mask_loc,masked_tokenid].mean().item()
+        logits_nc_masked_tok_mean = logits_nc_all[:,mask_loc,masked_tokenid].mean().item()
+        logits_nc_pred_tok_mean = logits_nc_for_pred_tok.mean().item()
+
+        sims_c, stds_c,num_of_examples_c =SameIndexExpi.calculte_stats_on_states(states_c,mask_loc)
+        sims_nc, stds_nc,num_of_examples_nc=SameIndexExpi.calculte_stats_on_states(states_nc,mask_loc)       
+
+        return sims_c,sims_nc,stds_c,stds_nc,\
+            num_of_examples_c,num_of_examples_nc,softmax_c_mean,\
+                softmax_nc_masked_mean_masked,softmax_nc_for_pred_tok_mean,\
+                    logits_c_mean,logits_nc_masked_tok_mean,logits_nc_pred_tok_mean
+
+    def calculte_stats_on_states(states: Tensor,mask_loc =-1,mask_loc_list1=[],mask_loc_list2=[]) -> Tuple[Tensor,Tensor,int]:
+        mean_sims = []
+        std_sims=[]
+        num_of_examples = 0
+        for state in states:
+            num_of_examples = state.shape[0]
+            # state.shape = (batch,hidden_d)
+            if mask_loc != -1: # we in the 'same-index-scenario' 
+                state1 = state[:,mask_loc,:]
+                state2 = state[:,mask_loc,:]
+            else:
+                state1 = state[:,mask_loc_list1,:]
+                state2 = state[:,mask_loc_list2,:]
+            # sims.shpae = (batch,batch)
+            sims = cosine_similarity(state1, state2)
+            sims = sims.cpu().numpy()
+            sims = sims[np.triu_indices(sims.shape[0],k=1)]
+            mean_sims.append(np.mean(sims))
+            std_sims.append(np.std(sims))
+                                      
+
+        return mean_sims,std_sims,num_of_examples
+
+    def create_table_from_results(words_dict:Dict ,sentences_list:List,num_of_iter=sys.maxsize):
+        results = []
+        for word in words_dict:
+            num_of_iter-=1
+            if num_of_iter==0:
+                break
+            for mask_loc in words_dict[word]:
+                # mask all words in the index:
+                current_sentences=[mask_word(sentences_list[i],int(mask_loc)) for i in words_dict[word][mask_loc]]
+                sims_c,sims_nc, stds_c,stds_nc ,num_of_examples_c,\
+                num_of_examples_nc,softmax_c_mean,\
+                softmax_nc_masked_mean,softmax_nc_for_pred_tok_mean,\
+                    logits_c_mean,logits_nc_masked_tok_mean,logits_nc_for_pred_tok_mean = SameIndexExpiTable.find_batch_similarities(current_sentences,int(mask_loc),word)
+
+                if num_of_examples_c < MIN_NUM_OF_SEN and num_of_examples_nc < MIN_NUM_OF_SEN:
+                    continue
+                print(f'new func: word: {word}, index: {mask_loc}, examples_c: {num_of_examples_c},examples_nc:{num_of_examples_nc}')
+                for layer, (sim_c, std_c,sim_nc, std_nc) in enumerate(zip(sims_c, stds_c,sims_nc, stds_nc)):
+                    results.append({'word': word, 'index': mask_loc, 'layer': layer, 'examples': num_of_examples_c, 'similarity': sim_c,\
+                        'mean logits masked_token':logits_c_mean,'mean logits pred_token': logits_c_mean,\
+                            'mean softmax masked_token':softmax_c_mean,'mean softmax pred_token': softmax_c_mean,\
+                                'std': std_c, 'predicted correct': 1})
+                    
+                    results.append({'word': word, 'index': mask_loc, 'layer': layer, 'examples': num_of_examples_nc, 'similarity': sim_nc,\
+                        'mean logits masked_token': logits_nc_masked_tok_mean, 'mean logits pred_token': logits_nc_for_pred_tok_mean,\
+                            'mean softmax masked_token':softmax_nc_masked_mean ,'mean softmax pred_token': softmax_nc_for_pred_tok_mean,\
+                             'std': std_nc,'predicted correct': 0})
+        df = pd.DataFrame(results)
+        df.to_csv('/home/itay.nakash/projects/smooth_language/results/expirement_result.csv', index=False)    
+
+
 
 
 
