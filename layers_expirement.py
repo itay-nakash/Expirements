@@ -68,13 +68,12 @@ def write_dict_to_excel(layers_sims ,states_num:int):
             if j<i:
                 results.append({f'layers':f'({i},{j})',f'sim':layers_sims[i][j]})
     df = pd.DataFrame(results)
-    df.to_csv('/home/itay.nakash/projects/smooth_language/layers_exp_result.csv', index=False)    
+    df.to_csv('/home/itay.nakash/projects/smooth_language/results/layers_exp_result.csv', index=False)    
 
 
 if __name__ == "__main__":
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
     
-    #create_table_from_results(word_to_sen,sentences_list)
     layers_sims=compare_layers(word_to_sen,sentences_list,5000)
     write_dict_to_excel(layers_sims,STATES_NUM)
