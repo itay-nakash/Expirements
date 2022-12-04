@@ -39,12 +39,14 @@ class Table_Expirement:
 
 
     def create_same_sen_table(self,num_of_sentences=sys.maxsize):
-        data = {'word1':[],'word2':[],'index1':[],'index2':[],'layer':[],\
-            'n_examples':[],'sim':[],'std':[],'correct1':[],'correct2':[],\
-                'logits1_masked':[],'logits1_pred':[],'softmax1_masked':[],'softmax1_pred':[],
-                'logits2_masked':[],'logits2_pred':[],'softmax2_masked':[],'softmax2_pred':[],
-                'mean_sim_to_maskedLM':[],'bertscore_n_m_r':[],'bertscore_n_m_p':[],'bertscore_n_m_f1':[]\
-                ,'bertscore_m_r':[],'bertscore_m_p':[],'bertscore_m_f1':[],'sen_len1':[],'sen_len2':[]}
+        data = {'word1','word2','index1','index2','layer',\
+            'n_examples','sim','std','correct1','correct2',\
+                'logits1_masked','logits1_pred','softmax1_masked','softmax1_pred',
+                'logits2_masked','logits2_pred','softmax2_masked','softmax2_pred',
+                'mean_sim_to_maskedLM','bertscore_n_m_r','bertscore_n_m_p','bertscore_n_m_f1'\
+                ,'bertscore_m_r','bertscore_m_p','bertscore_m_f1','sen_len1','sen_len2'}
+        for key in data:
+            data[key]=[]
         values={}
         sen_list_batch = random.choices(self.sentences_list,k=1000)
         for i,sen in enumerate(sen_list_batch):
@@ -115,6 +117,28 @@ class Table_Expirement:
 
 class SameIndexExpiTable:
 
+    def verify_results(values:Dict,pred_correct:Tensor,pred_tensor:Tensor,sen1_index:int,sen2_index:int,mask_index:int,masked_tokenid:int):
+        sen1=values['sen1']
+        sen2=values['sen2']
+        expirements_utils.test_pred_consistent(sen=sen1,pred_correct=pred_correct[sen1_index],pred_token=pred_tensor[sen1_index],mask_index=mask_index,masked_tokenid=masked_tokenid)
+        expirements_utils.test_pred_consistent(sen=sen2,pred_correct=pred_correct[sen2_index],pred_token=pred_tensor[sen2_index],mask_index=mask_index,masked_tokenid=masked_tokenid)
+        
+        print(f'first sen:{sen1}\n second sen:{sen2} \
+            \n sen1 pred_c:{pred_correct[sen1_index]}\n sen2 pred_c:{pred_correct[sen2_index]}\
+            \n sen1 word:{pred_tensor[sen1_index]}\n sen2 pred_c:{pred_tensor[sen2_index]}')
+    def create_data_dict():
+        keys=['sen1','sen2','sen_len1','sen_len2','word1','word2','index1','index2','layer',\
+    'n_examples','sim','std','correct1','correct2',\
+        'logits1_masked','logits1_pred','softmax1_masked','softmax1_pred',
+        'logits2_masked','logits2_pred','softmax2_masked','softmax2_pred',
+        'mean_sim_to_maskedLM','bertscore_n_m_r','bertscore_n_m_p','bertscore_n_m_f1'\
+        ,'bertscore_m_r','bertscore_m_p','bertscore_m_f1']
+        data = dict.fromkeys(keys)
+        for key in data:
+            data[key]=[]
+        values=dict.fromkeys(keys)
+        return data,values
+    
     def seperate_correct_incorrect_predict(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tuple[Tensor]:
         # get the predicted token_id of each sen:
         arg_max_tensor=logits[:,mask_index].argmax(dim=-1)
@@ -153,7 +177,7 @@ class SameIndexExpiTable:
 
 
     def create_table_from_results(words_dict:Dict ,sentences_list:List,num_of_iter=sys.maxsize):
-        results = []
+        data,values = SameIndexExpiTable.create_data_dict()
         for masked_word in words_dict:
             num_of_iter-=1
             if num_of_iter==0:
@@ -173,19 +197,18 @@ class SameIndexExpiTable:
 
                 for pair_indx in pairs_indexes:
                     sen1_index,sen2_index=expirements_utils.convert_k_to_pair(pair_indx)
-                    sen1=current_sentences[sen1_index]
-                    sen2=current_sentences[sen2_index]
-                    expirements_utils.test_pred_consistent(sen=sen1,pred_correct=pred_correct[sen1_index],pred_token=pred_tensor[sen1_index],mask_index=mask_index,masked_tokenid=masked_tokenid)
-                    expirements_utils.test_pred_consistent(sen=sen2,pred_correct=pred_correct[sen2_index],pred_token=pred_tensor[sen2_index],mask_index=mask_index,masked_tokenid=masked_tokenid)
+                    values['sen1']=current_sentences[sen1_index]
+                    values['sen2']=current_sentences[sen2_index]
                     
-                    
-                    print(f'first sen: {sen1}\n second sen:{sen2} \
-                     \n sen1 pred_c:{pred_correct[sen1_index]}\n sen2 pred_c:{pred_correct[sen2_index]}\
-                     \n sen1 word:{pred_tensor[sen1_index]}\n sen2 pred_c:{pred_tensor[sen2_index]}'
-                     )
 
 
-        df = pd.DataFrame(results)
+
+
+                    SameIndexExpiTable.verify_results(values=values,pred_correct=pred_correct,\
+                        pred_tensor=pred_tensor,sen1_index=sen1_index,sen2_index=sen2_index,mask_index=mask_index,masked_tokenid=masked_tokenid)
+
+
+        df = pd.DataFrame(data)
         df.to_csv('/home/itay.nakash/projects/smooth_language/results/expirement_result.csv', index=False)    
 
 
