@@ -158,19 +158,20 @@ class DifferentIndexExpi:
     def create_table_from_results(self,sentences_list,max_number_of_examples=sys.maxsize):
         results = []
         for word in self.words_dict:
+            if len(results) > max_number_of_examples:
+                break
+            # not enough indexes for 2 seperate groups:
+            if len(self.words_dict[word].keys()) < 2*self.indexes_sets_size:
+                continue
             indexes1,indexes2 = self.choose_subsets(self.words_dict[word].keys())
             indexes_lens=[]
             all_current_sents=[]
-            for mask_loc1 in indexes1+indexes2:
-                current_sentences=[mask_word(sentences_list[i],int(mask_loc1)) for i in self.words_dict[word][mask_loc1]]
+            for mask_loc in indexes1+indexes2:
+                current_sentences=[mask_word(sentences_list[i],int(mask_loc)) for i in self.words_dict[word][mask_loc]]
                 indexes_lens.append(len(current_sentences))
                 all_current_sents+=current_sentences
                 # concate the lists to get all the sentences inputs:
             results += DifferentIndexExpi.find_batch_similarities(all_current_sents,indexes1,indexes2,indexes_lens,word)
-            if len(results) > max_number_of_examples:
-                df = pd.DataFrame(results)
-                df.to_csv('/home/itay.nakash/projects/smooth_language/results/different_index_exp.csv', index=False)
-                return
         df = pd.DataFrame(results)
         df.to_csv('/home/itay.nakash/projects/smooth_language/results/different_index_exp.csv', index=False)
 
@@ -231,15 +232,27 @@ class DifferentIndexExpi:
                 if num_of_examples ==0:
                     continue
                 for layer, (sim_c, std_c) in enumerate(zip(mean_sims, std_sims)):
-                    results.append({'word': masked_word, 'index1': indexes1[i],'index2': indexes2[j], 'layer': layer, 'examples': num_of_examples*2, 'similarity': sim_c,'std': std_c})
+                    results.append({'word': masked_word, 'index1': indexes1[i],'index2': indexes2[j], 'layer': layer, 'examples': num_of_examples*2, 'similarity': sim_c,'std': std_c\
+                        })
         return results
-
-
-
 
 
 if __name__ == "__main__":
     most_freq_words=read_dict_from_json('n_most_frq')
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
+    exp2 = DifferentIndexExpi(word_to_sen,5)
+    exp2.create_table_from_results(sentences_list,160000)
+
+
+
+''''
+the run in screen: 
+
+if __name__ == "__main__":
+    most_freq_words=read_dict_from_json('n_most_frq')
+    word_to_sen=read_dict_from_json('word_to_sen_dict')
+    sentences_list=read_dict_from_json('sentences_list')
     SameIndexExpi.create_table_from_results(word_to_sen,sentences_list)
+
+'''
