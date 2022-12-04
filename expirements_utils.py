@@ -64,23 +64,41 @@ def check_if_predicted_correct(logits:Tensor,mask_index:int,masked_tokenid:int):
     predicted_token_id=logits[:,mask_index].argmax(dim=-1)
     return (predicted_token_id == masked_tokenid).item()
 
-
+def get_sen_states(sen: str):
+    input_ids_padded=convert_sentences_list_to_model_input([sen])
+    with torch.no_grad():
+        outputs = model(**input_ids_padded, output_hidden_states=True)
+    return outputs['hidden_states'],outputs['logits']
 
 def convert_k_to_pair(k):
     q = np.floor(np.sqrt(8*(k-1)+1)/2 +1.5)
     p = k - (q-1)*(q-2)/2
-    return q,p
+    return int(q),int(p)
+
 def generate_k_unique_pairs(n:int,k:int):
     num_of_pairs = (n/2)*(n-1) # = n*(n-1)/2 number of pairs from 0 to n
     assert (k < num_of_pairs)
     pairs_indexes = random.sample(range(1,int(num_of_pairs)),k)
-    return pairs_indexes,k
+    return pairs_indexes
 
 
+def run_model_on_batch(sen_list:List[str]):
+    input_ids_padded = convert_sentences_list_to_model_input(sen_list)
+    with torch.no_grad():
+        outputs = model(**input_ids_padded, output_hidden_states=True)
+    # states[0].shape = (batch,tokens,hidden_d) - dim of each state, we have 13 states as number of layers
+    return outputs['hidden_states'],outputs['logits']
 
+
+def test_pred_consistent(sen:List[str],pred_correct:int,pred_token:int,mask_index:int,masked_tokenid:int):
+    _,logits=get_sen_states(sen)
+    # make sure it predict the same token:
+    assert pred_token==logits[:,int(mask_index)].argmax(dim=-1)
+    # make sure it says it predicted correctly only if it did
+    assert pred_correct== (pred_token==masked_tokenid)
     
 if __name__ == "__main__":
     #test:
-    a,k=generate_k_unique_pairs(4,5)
+    a=generate_k_unique_pairs(4,5)
     for i in a:
         print(convert_k_to_pair(i))
