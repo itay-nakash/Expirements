@@ -8,6 +8,12 @@ import bert_score
 from torch import Tensor, logit
 from transformers import AutoModelForMaskedLM, AutoTokenizer, pipeline
 import random
+import torch.nn as nn
+import faiss
+import faiss.contrib.torch_utils
+
+
+
 tokenizer = AutoTokenizer.from_pretrained("roberta-base")
 model = AutoModelForMaskedLM.from_pretrained("roberta-base")
 
@@ -53,8 +59,8 @@ def get_similarity_between_two_states(states1:Tensor,states2:Tensor):
     cos_s=torch.nn.CosineSimilarity(dim=0)
     sims=[]
     for i,layer1 in enumerate(states1):
-        s1=states1[i][0,:,:]
-        s2=states2[i][0,:,:]
+        s1=states1[i][:,:]
+        s2=states2[i][:,:]
         res=cos_s(s1,s2)
         sims.append(np.mean(res.cpu().numpy()))
     return tuple(sims)
@@ -97,6 +103,78 @@ def test_pred_consistent(sen:List[str],pred_correct:int,pred_token:int,mask_inde
     # make sure it says it predicted correctly only if it did
     assert pred_correct== (pred_token==masked_tokenid)
     
+
+def get_bertscores_all_sents(pairs_indexes:List[int],current_sentences:List[List[str]]):
+    sen_list1,sen_list2=[],[]
+    for pair_indx in pairs_indexes:
+        sen1_index,sen2_index=convert_k_to_pair(pair_indx)
+        sen_list1.append(" ".join(current_sentences[sen1_index]))
+        sen_list2.append(" ".join(current_sentences[sen2_index]))
+    
+    return bert_score.score(sen_list1,sen_list2, lang='en', verbose=True)
+
+
+
+lm_norm = nn.Sequential(
+    model.lm_head.dense,
+    nn.GELU(),
+    model.lm_head.layer_norm,
+)
+def lmHead():
+    res = faiss.StandardGpuResources()  # use a single GPU
+    embeddings = model.roberta.embeddings.word_embeddings.weight
+    N, d = embeddings.shape
+    avoid_tokens = []
+    with torch.no_grad():
+        embeddings = embeddings.detach().clone()
+        # embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
+        for tok in avoid_tokens:
+            embeddings[tok].fill_(0.)
+    index = faiss.IndexFlatIP(d)
+    # index = faiss.IndexIVFFlat(index, d, 8192, faiss.METRIC_INNER_PRODUCT)#faiss.METRIC_L2)
+    # here we specify METRIC_L2, by default it performs inner-product search
+    gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
+    gpu_index.train(embeddings) # add vectors to the index
+    gpu_index.add(embeddings) # add vectors to the index
+
+
+
+def classify_with_lm_head(x, k=1):
+        # logits = model.lm_head(x)
+        x = lm_norm(x)
+        logits = F.linear(x, model.lm_head.decoder.weight, model.lm_head.decoder.bias)
+        return logits.topk(k=k, dim=-1)
+
+def decode_inner_feats(sentence, k=1, index=None, normalize=False, classifier=None):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.eval()
+    inputs = tokenizer(sentence, return_tensors="pt").to(device)
+    outputs = model(**inputs, output_hidden_states=True)
+    decoded = []
+    for layer, state in enumerate(outputs.hidden_states):
+        if index is not None:
+            if normalize:
+                state = lm_norm(state)
+                state = state / state.norm(dim=-1, keepdim=True)
+            D, I = index.search(state.view(-1, d), k)
+            # print(I)
+            # flatten I list of lists
+            for i in range(k):
+                nearest = [item[i] for item in I]
+                decoded.append({
+                    "sentence": tokenizer.decode(nearest),
+                    "distance": sum([d[i] for d in D]) / len(D),
+                    "layer": layer,
+                    'metric': f'{i}-NN'})
+        if classifier is not None:
+            distance, nearest = classifier(state, k=k)
+            for i in range(k):
+                decoded.append({
+                    "sentence": tokenizer.decode(nearest[:, :, i].view(-1)),
+                    "distance": distance[:, :, i].mean().item(),
+                    "layer": layer})
+    return decoded
+
 if __name__ == "__main__":
     #test:
     a=generate_k_unique_pairs(4,5)

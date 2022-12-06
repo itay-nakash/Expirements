@@ -43,7 +43,7 @@ class Table_Expirement:
             'n_examples','sim','std','correct1','correct2',\
                 'logits1_masked','logits1_pred','softmax1_masked','softmax1_pred',
                 'logits2_masked','logits2_pred','softmax2_masked','softmax2_pred',
-                'mean_sim_to_maskedLM','bertscore_n_m_r','bertscore_n_m_p','bertscore_n_m_f1'\
+                'sim_maskedLM','sim_maskedLM_not_normalize','bertscore_n_m_r','bertscore_n_m_p','bertscore_n_m_f1'\
                 ,'bertscore_m_r','bertscore_m_p','bertscore_m_f1','sen_len1','sen_len2'}
         for key in data:
             data[key]=[]
@@ -128,10 +128,10 @@ class SameIndexExpiTable:
             \n sen1 word:{pred_tensor[sen1_index]}\n sen2 pred_c:{pred_tensor[sen2_index]}')
     def create_data_dict():
         keys=['sen1','sen2','sen_len1','sen_len2','word1','word2','index1','index2','layer',\
-    'n_examples','sim','std','correct1','correct2',\
+    'n_exampels','sim','std','correct1','correct2',\
         'logits1_masked','logits1_pred','softmax1_masked','softmax1_pred',
         'logits2_masked','logits2_pred','softmax2_masked','softmax2_pred',
-        'mean_sim_to_maskedLM','bertscore_n_m_r','bertscore_n_m_p','bertscore_n_m_f1'\
+        'mean_sim_to_maskedLM','bertscore_nm_r','bertscore_nm_p','bertscore_nm_f1'\
         ,'bertscore_m_r','bertscore_m_p','bertscore_m_f1']
         data = dict.fromkeys(keys)
         for key in data:
@@ -185,29 +185,67 @@ class SameIndexExpiTable:
             masked_tokenid = tokenizer.convert_tokens_to_ids(masked_word)
             for mask_index in words_dict[masked_word]:
                 # mask all words in the index:
-                current_sentences=[(mask_word(sentences_list[i],int(mask_index))[0]) for i in words_dict[masked_word][mask_index]]
-                states,logits=expirements_utils.run_model_on_batch(current_sentences)
+                current_sentences_m=[(mask_word(sentences_list[i],int(mask_index))[0]) for i in words_dict[masked_word][mask_index]]
+                states,logits=expirements_utils.run_model_on_batch(current_sentences_m)
                 pred_correct,pred_tensor = SameIndexExpiTable.indice_correct_incorrect_predict(states,logits,int(mask_index),masked_tokenid)
-                num_sens=len(current_sentences)
+                num_sens=len(current_sentences_m)
                 max_sen_indx=num_sens-1
                 num_pairs = int((max_sen_indx*(max_sen_indx-1)/2)-1)
-                if max_sen_indx<5:
+                if max_sen_indx<MIN_NUM_OF_SEN:
                     continue
                 pairs_indexes = expirements_utils.generate_k_unique_pairs(n=max_sen_indx,k=min(num_pairs,MAX_SEN_PAIRS))
+                # bertscore with mask:
+                m_P, m_R, m_F1=expirements_utils.get_bertscores_all_sents(pairs_indexes,current_sentences_m)
+                # bertscore without mask
+                nm_P,nm_R,nm_F1=expirements_utils.get_bertscores_all_sents(pairs_indexes,sentences_list)
+                for i,pair_indx in enumerate(pairs_indexes):
+                    sen1_indx,sen2_indx=expirements_utils.convert_k_to_pair(pair_indx)
+                    logits1=logits[sen1_indx]
+                    logits2=logits[sen2_indx]
+                    states1=tuple([state[sen1_indx,:,:] for state in states])
+                    states2=tuple([state[sen2_indx,:,:] for state in states])
+                    values['sen1']=current_sentences_m[sen1_indx]
+                    values['sen2']=current_sentences_m[sen2_indx]
+                    values['sen_len1']=len(current_sentences_m[sen1_indx])
+                    values['sen_len2']=len(current_sentences_m[sen2_indx])
+                    values['word1']=masked_word
+                    values['word2']=masked_word
+                    values['index1']=sen1_indx
+                    values['index2']=sen2_indx
+                    values['n_exampels']=1
+                    values['sim']=expirements_utils.get_similarity_between_two_states(states1,states2)
+                    values['std']=-1
+                    values['correct1']=pred_correct[int(sen1_indx)].item()
+                    values['correct2']=pred_correct[int(sen2_indx)].item()
+                    values['logits1_masked']=logits1[int(mask_index),masked_tokenid].item()
+                    values['logits2_masked']=logits2[int(mask_index),masked_tokenid].item()
+                    values['logits1_pred']=logits1[int(mask_index),pred_tensor[sen1_indx]].item()
+                    values['logits2_pred']=logits1[int(mask_index),pred_tensor[sen2_indx]].item()
+                    values['softmax1_masked']=torch.softmax(logits1,dim=-1)[int(mask_index),masked_tokenid].item()
+                    values['softmax2_masked']=torch.softmax(logits2,dim=-1)[int(mask_index),masked_tokenid].item()
+                    values['softmax1_pred']=torch.softmax(logits1,dim=-1)[int(mask_index),pred_tensor[sen1_indx]].item()
+                    values['softmax2_pred']=torch.softmax(logits2,dim=-1)[int(mask_index),pred_tensor[sen2_indx]].item()
+                    values['bertscore_m_r']=m_R[i].item()
+                    values['bertscore_m_p']=m_P[i].item()
+                    values['bertscore_m_f1']=m_F1[i].item()
+                    values['bertscore_nm_r']=nm_R[i].item()
+                    values['bertscore_nm_p']=nm_P[i].item()
+                    values['bertscore_nm_f1']=nm_F1[i].item()
 
-                for pair_indx in pairs_indexes:
-                    sen1_index,sen2_index=expirements_utils.convert_k_to_pair(pair_indx)
-                    values['sen1']=current_sentences[sen1_index]
-                    values['sen2']=current_sentences[sen2_index]
-                    
-
-
-
-
-                    SameIndexExpiTable.verify_results(values=values,pred_correct=pred_correct,\
-                        pred_tensor=pred_tensor,sen1_index=sen1_index,sen2_index=sen2_index,mask_index=mask_index,masked_tokenid=masked_tokenid)
-
-
+                    for i in range(len(states)):
+                        for key in data:
+                            if key=='layer':
+                                data[key].append(i) # i is the layer number
+                            elif key=='sim':
+                                data[key].append(values[key][i].item())
+                            elif key=='sim_maskedLM':
+                                data[key]=-1
+                            elif key=='sim_maskedLM_not_normalize':
+                                data[key]=-1
+                            else:
+                                data[key].append(values[key])
+                    print('---finish pair---')
+            print('------------------------- finished word -----------------------')
         df = pd.DataFrame(data)
         df.to_csv('/home/itay.nakash/projects/smooth_language/results/expirement_result.csv', index=False)    
 
@@ -220,4 +258,4 @@ if __name__ == "__main__":
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
     
-    SameIndexExpiTable.create_table_from_results(word_to_sen,sentences_list)
+    SameIndexExpiTable.create_table_from_results(word_to_sen,sentences_list,10)
