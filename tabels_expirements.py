@@ -20,9 +20,20 @@ MIN_NUM_OF_SEN=10
 MAX_BERTSCORE_VALUE = 1
 NUM_OF_MIXES=50
 MAX_SEN_PAIRS=100
-# TODO: currently it is implemented in a stright-foward way, but not effificet.
-# I run the model each time on sentences matching instead of working with batch,
-# needs to be changed.
+PAIRS_PER_WORD=40
+''' expirements:
+        1. same word, same index (SameIndexExpiTable)
+        2. same word, different index
+        3. different word, same index
+        4. different word, different index
+
+    features:
+    sentence1, sentence2, word 1, word 2, sen1_len, sen2_len,
+    index 1, index 2, layer, examples, similarity, std, correct 1,
+    correct 2, mean logit masked, mean logit predicted, mean soft max masked,
+    mean softmax predicted, mean similarity to masked LM head,
+    BERT score between sentences without masking, BERTscore with masking
+'''
 class Table_Expirement:
 
     def __init__(self,most_freq_words:List, words_dict:Dict,sentences_list:List):
@@ -112,6 +123,93 @@ class Table_Expirement:
         with open('/home/itay.nakash/projects/smooth_language/results/df_same_sen_'+str(num_of_sentences), 'a') as f:
             dfAsString = df.to_string(header=False, index=False)
             f.write(dfAsString)
+
+
+
+class SameIndexDiffWord:
+
+    def verify_results(values:Dict,pred_correct:Tensor,pred_tensor:Tensor,sen1_index:int,sen2_index:int,mask_index:int,masked_tokenid:int):
+        sen1=values['sen1']
+        sen2=values['sen2']
+        expirements_utils.test_pred_consistent(sen=sen1,pred_correct=pred_correct[sen1_index],pred_token=pred_tensor[sen1_index],mask_index=mask_index,masked_tokenid=masked_tokenid)
+        expirements_utils.test_pred_consistent(sen=sen2,pred_correct=pred_correct[sen2_index],pred_token=pred_tensor[sen2_index],mask_index=mask_index,masked_tokenid=masked_tokenid)
+        
+        print(f'first sen:{sen1}\n second sen:{sen2} \
+            \n sen1 pred_c:{pred_correct[sen1_index]}\n sen2 pred_c:{pred_correct[sen2_index]}\
+            \n sen1 word:{pred_tensor[sen1_index]}\n sen2 pred_c:{pred_tensor[sen2_index]}')
+   
+    def create_data_dict():
+        keys=['sen1','sen2','sen_len1','sen_len2','word1','word2','index1','index2','layer',\
+    'n_exampels','sim','std','correct1','correct2',\
+        'logits1_masked','logits1_pred','softmax1_masked','softmax1_pred',
+        'logits2_masked','logits2_pred','softmax2_masked','softmax2_pred',
+        'mean_sim_to_maskedLM','bertscore_nm_r','bertscore_nm_p','bertscore_nm_f1'\
+        ,'bertscore_m_r','bertscore_m_p','bertscore_m_f1']
+        data = dict.fromkeys(keys)
+        for key in data:
+            data[key]=[]
+        values=dict.fromkeys(keys)
+        return data,values
+    
+    def seperate_correct_incorrect_predict(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tuple[Tensor]:
+        # get the predicted token_id of each sen:
+        arg_max_tensor=logits[:,mask_index].argmax(dim=-1)
+        correct_mask = arg_max_tensor==masked_tokenid
+        incorrect_mask=arg_max_tensor!=masked_tokenid
+        
+        #TODO: find a way to mark what was correct and what not
+        states_c= tuple([state[correct_mask] for state in enumerate(states)])
+        states_nc= tuple([state[incorrect_mask] for state in states])
+        logits_c= logits[correct_mask]
+        # returns the logits on all the tokens, just on sentences predicted incorrect
+        logits_nc= logits[incorrect_mask]
+        predicted_tokens_in_nc = arg_max_tensor[incorrect_mask]
+
+        return states_c, states_nc,logits_c\
+            ,logits_nc,predicted_tokens_in_nc
+
+    def indice_correct_incorrect_predict(states: Tensor, logits: Tensor,mask_index:int, masked_tokenid: float) -> Tuple[Tensor]:
+        # get the predicted token_id of each sen:
+        arg_max_tensor=logits[:,mask_index].argmax(dim=-1)
+        #get the masks:
+        correct_mask = arg_max_tensor==masked_tokenid
+        incorrect_mask=arg_max_tensor!=masked_tokenid
+
+        #tensor as size of batch:
+        pred_correct=torch.zeros_like(states[0][:,0,0])
+        for state in states:
+            for i in range(state.shape[0]):
+                if correct_mask[i]:
+                    pred_correct[i]=1
+                else:
+                    pred_correct[i]=0
+
+        return pred_correct,arg_max_tensor
+
+
+
+    def create_table_from_results(words_dict:Dict ,sentences_list:List,num_of_iter=sys.maxsize):
+        data,values = SameIndexExpiTable.create_data_dict()
+        for masked_word in words_dict:
+            num_of_iter-=1
+            if num_of_iter==0:
+                break
+            masked_tokenid = tokenizer.convert_tokens_to_ids(masked_word)
+            num_of_pairs = (len(words_dict[masked_word])/2)*(len(words_dict[masked_word])-1)
+            maskes_paris=expirements_utils.generate_k_unique_pairs(len(words_dict[masked_word]),min(num_of_pairs-1,PAIRS_PER_WORD))
+            for mask_pair in maskes_paris:
+                mask_index1,mask_index2 = expirements_utils.convert_k_to_pair(mask_pair)
+                current_sentences_m1=[(mask_word(sentences_list[i],int(mask_index1))[0]) for i in words_dict[masked_word][mask_index1]]
+                current_sentences_m2= [(mask_word(sentences_list[i],int(mask_index2))[0]) for i in words_dict[masked_word][mask_index2]]
+                states1,logits1=expirements_utils.run_model_on_batch(current_sentences_m1)
+                states2,logits2=expirements_utils.run_model_on_batch(current_sentences_m2)
+                pred_correct1,pred_tensor1 = SameIndexExpiTable.indice_correct_incorrect_predict(states1,logits1,int(mask_index1),masked_tokenid)
+                pred_correct2,pred_tensor2 = SameIndexExpiTable.indice_correct_incorrect_predict(states2,logits2,int(mask_index2),masked_tokenid)
+                
+            print('------------------------- finished word -----------------------')
+        df = pd.DataFrame(data)
+        df.to_csv('/home/itay.nakash/projects/smooth_language/results/expirement_result.csv', index=False)    
+
 
 
 
