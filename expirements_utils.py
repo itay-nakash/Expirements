@@ -65,37 +65,43 @@ def get_similarity_between_two_states(states1:Tensor,states2:Tensor):
         sims.append(np.mean(res.cpu().numpy()))
     return tuple(sims)
 
-# checked for correctf for a single sentence:
+
+
+# checked for correct for a single sentence:
 def check_if_predicted_correct(logits:Tensor,mask_index:int,masked_tokenid:int):
     predicted_token_id=logits[:,mask_index].argmax(dim=-1)
     return (predicted_token_id == masked_tokenid).item()
 
+# run the model on a sentence, and return the states and logits as output
 def get_sen_states(sen: str):
     input_ids_padded=convert_sentences_list_to_model_input([sen])
     with torch.no_grad():
         outputs = model(**input_ids_padded, output_hidden_states=True)
     return outputs['hidden_states'],outputs['logits']
 
-def convert_k_to_pair(k):
+# decode a pair encoded as a number (k)
+def convert_k_to_pair(k:int)-> Tuple[int,int]:
     q = np.floor(np.sqrt(8*(k-1)+1)/2 +1.5)
     p = k - (q-1)*(q-2)/2
     return int(q),int(p)
 
-def generate_k_unique_pairs(n:int,k:int):
+# encode k pairs from 1 to n, as k pairs.
+def generate_k_unique_pairs(n:int,k:int)-> List[int]:
     num_of_pairs = (n/2)*(n-1) # = n*(n-1)/2 number of pairs from 0 to n
-    assert (k < num_of_pairs)
+    if (k < num_of_pairs):
+        return [] #can't sample a bigger group than num of pairs
     pairs_indexes = random.sample(range(1,int(num_of_pairs)),k)
     return pairs_indexes
 
-
-def run_model_on_batch(sen_list:List[str]):
+# run the model on a batch of sentences, and return the states and logits as output
+def run_model_on_batch(sen_list:List[str])->Tuple[Tensor,Tensor]:
     input_ids_padded = convert_sentences_list_to_model_input(sen_list)
     with torch.no_grad():
         outputs = model(**input_ids_padded, output_hidden_states=True)
     # states[0].shape = (batch,tokens,hidden_d) - dim of each state, we have 13 states as number of layers
     return outputs['hidden_states'],outputs['logits']
 
-
+# make sure that the prediction in pred_correct is correct
 def test_pred_consistent(sen:List[str],pred_correct:int,pred_token:int,mask_index:int,masked_tokenid:int):
     _,logits=get_sen_states(sen)
     # make sure it predict the same token:
@@ -103,8 +109,8 @@ def test_pred_consistent(sen:List[str],pred_correct:int,pred_token:int,mask_inde
     # make sure it says it predicted correctly only if it did
     assert pred_correct== (pred_token==masked_tokenid)
     
-
-def get_bertscores_all_sents(pairs_indexes:List[int],current_sentences:List[List[str]]):
+# calculate bertscore on a batch
+def get_bertscores_all_sents(pairs_indexes:List[int],current_sentences:List[List[str]])->Tuple(Tensor,Tensor,Tensor):
     sen_list1,sen_list2=[],[]
     for pair_indx in pairs_indexes:
         sen1_index,sen2_index=convert_k_to_pair(pair_indx)
@@ -115,11 +121,14 @@ def get_bertscores_all_sents(pairs_indexes:List[int],current_sentences:List[List
 
 
 
+# elads code:
+
 lm_norm = nn.Sequential(
     model.lm_head.dense,
     nn.GELU(),
     model.lm_head.layer_norm,
 )
+
 def lmHead():
     res = faiss.StandardGpuResources()  # use a single GPU
     embeddings = model.roberta.embeddings.word_embeddings.weight
@@ -136,8 +145,6 @@ def lmHead():
     gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
     gpu_index.train(embeddings) # add vectors to the index
     gpu_index.add(embeddings) # add vectors to the index
-
-
 
 def classify_with_lm_head(x, k=1):
         # logits = model.lm_head(x)
