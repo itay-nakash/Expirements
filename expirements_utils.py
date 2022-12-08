@@ -3,17 +3,13 @@ import numpy as np
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import bert_score
 from torch import Tensor, logit
 from transformers import AutoModelForMaskedLM, AutoTokenizer, pipeline
 import random
-import torch.nn as nn
 import faiss
-import faiss.contrib.torch_utils
-
-
-
 tokenizer = AutoTokenizer.from_pretrained("roberta-base")
 model = AutoModelForMaskedLM.from_pretrained("roberta-base")
 
@@ -88,7 +84,7 @@ def convert_k_to_pair(k:int)-> Tuple[int,int]:
 # encode k pairs from 1 to n, as k pairs.
 def generate_k_unique_pairs(n:int,k:int)-> List[int]:
     num_of_pairs = (n/2)*(n-1) # = n*(n-1)/2 number of pairs from 0 to n
-    if (k < num_of_pairs):
+    if (k > num_of_pairs):
         return [] #can't sample a bigger group than num of pairs
     pairs_indexes = random.sample(range(1,int(num_of_pairs)),k)
     return pairs_indexes
@@ -110,7 +106,7 @@ def test_pred_consistent(sen:List[str],pred_correct:int,pred_token:int,mask_inde
     assert pred_correct== (pred_token==masked_tokenid)
     
 # calculate bertscore on a batch
-def get_bertscores_all_sents(pairs_indexes:List[int],current_sentences:List[List[str]])->Tuple(Tensor,Tensor,Tensor):
+def get_bertscores_all_sents(pairs_indexes:List[int],current_sentences:List[List[str]]):
     sen_list1,sen_list2=[],[]
     for pair_indx in pairs_indexes:
         sen1_index,sen2_index=convert_k_to_pair(pair_indx)
@@ -119,10 +115,33 @@ def get_bertscores_all_sents(pairs_indexes:List[int],current_sentences:List[List
     
     return bert_score.score(sen_list1,sen_list2, lang='en', verbose=True)
 
+def layer_predict_with_norm(state:Tensor):
+    lm_head=model.lm_head
+    output=lm_head.forward(state)
+    return output
 
+def layer_predict_without_norm(state:Tensor):
+    lm_head_without_norm=model.lm_head.decoder
+    output=lm_head_without_norm.forward(state)
+    return output
+
+def fill_masked_pred_logits_softmax(logits:Tensor,mask_index:int,masked_tokenid:int,sen_indx:int,pred_tensor:Tensor):
+    return logits[int(mask_index),masked_tokenid].item(),\
+        logits[int(mask_index),pred_tensor[sen_indx]].item(),\
+            torch.softmax(logits,dim=-1)[int(mask_index),masked_tokenid].item(),\
+                torch.softmax(logits,dim=-1)[int(mask_index),pred_tensor[sen_indx]].item()
+
+# To add:
+# predicted word for the last layer
+# predicted word for the current layer
 
 # elads code:
+# with layer norm:
+# lm_head = roberta.lm_head
+# run over the hidden states over the
 
+# without layer norm:
+# lm_head.decoder(hidden)
 lm_norm = nn.Sequential(
     model.lm_head.dense,
     nn.GELU(),
@@ -137,9 +156,10 @@ def lmHead():
     with torch.no_grad():
         embeddings = embeddings.detach().clone()
         # embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
+    #TODO: why it creates a copy of the embedding?
         for tok in avoid_tokens:
             embeddings[tok].fill_(0.)
-    index = faiss.IndexFlatIP(d)
+    index = faiss.IndexFlatIP(d) #TODO: ???
     # index = faiss.IndexIVFFlat(index, d, 8192, faiss.METRIC_INNER_PRODUCT)#faiss.METRIC_L2)
     # here we specify METRIC_L2, by default it performs inner-product search
     gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
