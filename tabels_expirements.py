@@ -283,8 +283,8 @@ class SameIndexExpiTable:
     def create_table_from_results(words_dict:Dict ,sentences_list:List,num_of_iter=sys.maxsize):
         org_num_of_iter=num_of_iter
         data,values = SameIndexExpiTable.create_data_dict()
-        for masked_word in words_dict:
-            if len(masked_word)<2: # patch 
+        for iter,masked_word in enumerate(words_dict):
+            if len(masked_word)<2 or iter<41: # patch 
                 continue
             num_of_iter-=1
             if num_of_iter==0:
@@ -362,10 +362,10 @@ class SameIndexExpiTable:
                         state_no_norm2=expirements_utils.layer_predict_without_norm(states2[i])
                         state_with_norm1=expirements_utils.layer_predict_with_norm(states1[i])
                         state_with_norm2=expirements_utils.layer_predict_with_norm(states2[i])
-                        logits1_masked_cl,logits1_pred_cl,softmax1_masked_cl,softmax1_pred_cl= expirements_utils.fill_masked_pred_logits_softmax(state_no_norm1,mask_index,masked_tokenid,sen1_indx,pred_tensor)
-                        logits2_masked_cl,logits2_pred_cl,softmax2_masked_cl,softmax2_pred_cl= expirements_utils.fill_masked_pred_logits_softmax(state_no_norm2,mask_index,masked_tokenid,sen2_indx,pred_tensor)
-                        logits1_masked_cl_no_norm,logits1_pred_cl_no_norm,softmax1_masked_cl_no_norm,softmax1_pred_cl_no_norm = expirements_utils.fill_masked_pred_logits_softmax(state_with_norm1,mask_index,masked_tokenid,sen1_indx,pred_tensor)
-                        logits2_masked_cl_no_norm,logits2_pred_cl_no_norm,softmax2_masked_cl_no_norm,softmax2_pred_cl_no_norm = expirements_utils.fill_masked_pred_logits_softmax(state_with_norm2,mask_index,masked_tokenid,sen2_indx,pred_tensor)
+                        logits1_masked_cl,logits1_pred_cl,softmax1_masked_cl,softmax1_pred_cl= expirements_utils.fill_masked_pred_logits_softmax(state_with_norm1,mask_index,masked_tokenid,sen1_indx,pred_tensor)
+                        logits2_masked_cl,logits2_pred_cl,softmax2_masked_cl,softmax2_pred_cl= expirements_utils.fill_masked_pred_logits_softmax(state_with_norm2,mask_index,masked_tokenid,sen2_indx,pred_tensor)
+                        logits1_masked_cl_no_norm,logits1_pred_cl_no_norm,softmax1_masked_cl_no_norm,softmax1_pred_cl_no_norm = expirements_utils.fill_masked_pred_logits_softmax(state_no_norm1,mask_index,masked_tokenid,sen1_indx,pred_tensor)
+                        logits2_masked_cl_no_norm,logits2_pred_cl_no_norm,softmax2_masked_cl_no_norm,softmax2_pred_cl_no_norm = expirements_utils.fill_masked_pred_logits_softmax(state_no_norm2,mask_index,masked_tokenid,sen2_indx,pred_tensor)
                         
                         data['logits1_masked_cl'].append(logits1_masked_cl)
                         data['logits1_pred_cl'].append(logits1_pred_cl)
@@ -400,4 +400,4 @@ if __name__ == "__main__":
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
     
-    SameIndexExpiTable.create_table_from_results(word_to_sen,sentences_list,2)
+    SameIndexExpiTable.create_table_from_results(word_to_sen,sentences_list,60)
