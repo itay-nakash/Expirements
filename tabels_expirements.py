@@ -236,7 +236,9 @@ class SameIndexExpiTable:
         'logits1_masked_cl', 'logits1_pred_cl','softmax1_masked_cl','softmax1_pred_cl',
         'logits2_masked_cl','logits2_pred_cl','softmax2_masked_cl','softmax2_pred_cl',
         'logits1_masked_cl_no_norm', 'logits1_pred_cl_no_norm','softmax1_masked_cl_no_norm','softmax1_pred_cl_no_norm',
-        'logits2_masked_cl_no_norm','logits2_pred_cl_no_norm','softmax2_masked_cl_no_norm','softmax2_pred_cl_no_norm',]
+        'logits2_masked_cl_no_norm','logits2_pred_cl_no_norm','softmax2_masked_cl_no_norm','softmax2_pred_cl_no_norm',
+        'predicted_token1_cl','predicted_token1_ll','predicted_token2_cl','predicted_token2_ll',
+        'predicted_token1_cl_no_norm','predicted_token1_ll_no_norm','predicted_token2_cl_no_norm','predicted_token2_ll_no_norm']
         data = dict.fromkeys(keys)
         for key in data:
             data[key]=[]
@@ -340,7 +342,16 @@ class SameIndexExpiTable:
                         values['softmax1_masked_no_norm'],values['softmax1_pred_no_norm']=expirements_utils.fill_masked_pred_logits_softmax(logits_no_norm1,mask_index,masked_tokenid,sen1_indx,pred_tensor)
                     values['logits2_masked_no_norm'],values['logits2_pred_no_norm'],\
                         values['softmax2_masked_no_norm'],values['softmax2_pred_no_norm']=expirements_utils.fill_masked_pred_logits_softmax(logits_no_norm2,mask_index,masked_tokenid,sen2_indx,pred_tensor)
-    
+                    
+                    #predicted_token1_cl','predicted_token1_ll','predicted_token2_cl','predicted_token2_ll',
+                    #'predicted_token1_cl_no_norm','predicted_token1_ll_no_norm','predicted_token2_cl_no_norm','predicted_token2_ll_no_norm']
+                    # predicted token ll:
+                    values['predicted_token1_ll']=expirements_utils.get_predicted_token_str(logits[sen1_indx],mask_index)
+                    values['predicted_token1_ll_no_norm']=expirements_utils.get_predicted_token_str(logits_no_norm1,mask_index)
+                    values['predicted_token2_ll']=expirements_utils.get_predicted_token_str(logits[sen2_indx],mask_index)
+                    values['predicted_token2_ll_no_norm']=expirements_utils.get_predicted_token_str(logits_no_norm2,mask_index)
+
+
                     #bertscores:
                     values['bertscore_m_r']=m_R[i].item()
                     values['bertscore_m_p']=m_P[i].item()
@@ -386,6 +397,19 @@ class SameIndexExpiTable:
                         data['logits2_pred_cl_no_norm'].append(logits2_pred_cl_no_norm)
                         data['softmax2_masked_cl_no_norm'].append(softmax2_masked_cl_no_norm)
                         data['softmax2_pred_cl_no_norm'].append(softmax2_pred_cl_no_norm)
+
+                        data['predicted_token1_cl'].append(expirements_utils.get_predicted_token_str(state_with_norm1,mask_index))
+                        data['predicted_token1_cl_no_norm'].append(expirements_utils.get_predicted_token_str(state_no_norm1,mask_index))
+                        data['predicted_token2_cl'].append(expirements_utils.get_predicted_token_str(state_with_norm2,mask_index))
+                        data['predicted_token2_cl_no_norm'].append(expirements_utils.get_predicted_token_str(state_no_norm2,mask_index))
+
+                        k=1
+                        if k==2:
+                            df = pd.DataFrame(data)
+                            df.to_csv('/home/itay.nakash/projects/smooth_language/results/df_same_sen_'+str(org_num_of_iter))
+                            return
+
+
                     print('---finish pair---')
             print('------------------------- finished word -----------------------')
 

@@ -62,10 +62,14 @@ def get_similarity_between_two_states(states1:Tensor,states2:Tensor):
     return tuple(sims)
 
 
+def get_predicted_token_str(logits:Tensor,mask_index:int)->str:
+    predicted_token_id=logits[int(mask_index),:].argmax(dim=-1).item()
+    return tokenizer.decode(token_ids=predicted_token_id)
+    
 
 # checked for correct for a single sentence:
 def check_if_predicted_correct(logits:Tensor,mask_index:int,masked_tokenid:int):
-    predicted_token_id=logits[:,mask_index].argmax(dim=-1)
+    predicted_token_id=logits[mask_index,:].argmax(dim=-1)
     return (predicted_token_id == masked_tokenid).item()
 
 # run the model on a sentence, and return the states and logits as output
