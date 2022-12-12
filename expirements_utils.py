@@ -15,9 +15,10 @@ model = AutoModelForMaskedLM.from_pretrained("roberta-base")
 
 
 def write_dict_to_json(dict,fname):
-    file_path='data/'+fname
-    with open(file_path) as outfile:
-        json.dump(dict, outfile)
+    file_path='/home/itay.nakash/projects/smooth_language/data/'+fname
+    json_str = json.dumps(dict)
+    with open(file_path,'w') as f:
+        f.write(json_str)
 
 def read_dict_from_json(fname):
     file_path='data/'+fname
@@ -68,9 +69,11 @@ def get_predicted_token_str(logits:Tensor,mask_index:int)->str:
     
 
 # checked for correct for a single sentence:
-def check_if_predicted_correct(logits:Tensor,mask_index:int,masked_tokenid:int):
-    predicted_token_id=logits[mask_index,:].argmax(dim=-1)
-    return (predicted_token_id == masked_tokenid).item()
+def check_if_predicted_correct(logits:Tensor,mask_index:int,masked_tokenid:str):
+    if get_predicted_token_str(logits,mask_index)[1:] == masked_tokenid:
+        return 1
+    else:
+        return 0
 
 # run the model on a sentence, and return the states and logits as output
 def get_sen_states(sen: str):
