@@ -15,11 +15,10 @@ from expirements_utils import tokenizer, model, convert_sentences_list_to_model_
 from expirements_utils import read_dict_from_json,mask_word,cosine_similarity
 import expirements_utils
 
-MAX_ATTEMPTS_RND=10
 MIN_NUM_OF_SEN=10
 MAX_BERTSCORE_VALUE = 1
 NUM_OF_MIXES=50
-MAX_SEN_PAIRS=5
+MAX_SEN_PAIRS=100
 PAIRS_PER_WORD=40
 ''' expirements:
         1. same word, same index (SameIndexExpiTable)
@@ -226,7 +225,7 @@ class SameIndexExpiTable:
             \n sen1 word:{pred_tensor[sen1_index]}\n sen2 pred_c:{pred_tensor[sen2_index]}')
     def create_data_dict():
         keys=['sen1','sen2','sen_len1','sen_len2','word1','word2','index1','index2',
-        'layer', 'n_exampels','sim','std','correct1','correct2',
+        'layer', 'n_exampels','sim','std','correct1','correct1_cl','correct1_cl_no_norm','correct2','correct2_cl','correct2_cl_no_norm',
         'bertscore_nm_r','bertscore_nm_p','bertscore_nm_f1'
         ,'bertscore_m_r','bertscore_m_p','bertscore_m_f1',
         'logits1_masked', 'logits1_pred','softmax1_masked','softmax1_pred',
@@ -282,11 +281,12 @@ class SameIndexExpiTable:
 
 
 
-    def create_table_from_results(words_dict:Dict ,sentences_list:List,num_of_iter=sys.maxsize):
+    def create_table_from_results(words_dict:Dict ,sentences_list:List,num_of_iter=sys.maxsize,start_at=0):
         org_num_of_iter=num_of_iter
         data,values = SameIndexExpiTable.create_data_dict()
         for iter,masked_word in enumerate(words_dict):
-            if len(masked_word)<2 or iter<41: # patch 
+            trimed_masked_word=masked_word[1:]
+            if len(trimed_masked_word)<2 or iter<start_at: # patch 
                 continue
             num_of_iter-=1
             if num_of_iter==0:
@@ -317,8 +317,8 @@ class SameIndexExpiTable:
                     values['sen2']=current_sentences_m[sen2_indx]
                     values['sen_len1']=len(current_sentences_m[sen1_indx])
                     values['sen_len2']=len(current_sentences_m[sen2_indx])
-                    values['word1']=masked_word
-                    values['word2']=masked_word
+                    values['word1']=trimed_masked_word
+                    values['word2']=trimed_masked_word
                     values['index1']=sen1_indx
                     values['index2']=sen2_indx
                     values['n_exampels']=1
@@ -403,11 +403,11 @@ class SameIndexExpiTable:
                         data['predicted_token2_cl'].append(expirements_utils.get_predicted_token_str(state_with_norm2,mask_index))
                         data['predicted_token2_cl_no_norm'].append(expirements_utils.get_predicted_token_str(state_no_norm2,mask_index))
 
-                        k=1
-                        if k==2:
-                            df = pd.DataFrame(data)
-                            df.to_csv('/home/itay.nakash/projects/smooth_language/results/df_same_sen_'+str(org_num_of_iter))
-                            return
+                        # TODO: make sure it works:
+                        data['correct1_cl'].append(expirements_utils.check_if_predicted_correct(state_with_norm1,mask_index,trimed_masked_word))
+                        data['correct2_cl'].append(expirements_utils.check_if_predicted_correct(state_with_norm2,mask_index,trimed_masked_word))
+                        data['correct1_cl_no_norm'].append(expirements_utils.check_if_predicted_correct(state_no_norm1,mask_index,trimed_masked_word))
+                        data['correct2_cl_no_norm'].append(expirements_utils.check_if_predicted_correct(state_no_norm2,mask_index,trimed_masked_word))
 
 
                     print('---finish pair---')
@@ -424,4 +424,4 @@ if __name__ == "__main__":
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
     
-    SameIndexExpiTable.create_table_from_results(word_to_sen,sentences_list,60)
+    SameIndexExpiTable.create_table_from_results(word_to_sen,sentences_list,50,0)
