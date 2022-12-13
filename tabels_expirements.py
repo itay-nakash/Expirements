@@ -33,98 +33,6 @@ PAIRS_PER_WORD=40
     mean softmax predicted, mean similarity to masked LM head,
     BERT score between sentences without masking, BERTscore with masking
 '''
-class Table_Expirement:
-
-    def __init__(self,most_freq_words:List, words_dict:Dict,sentences_list:List):
-        # the size of each :
-        self.most_freq_words = most_freq_words
-        self.words_dict = words_dict
-        self.sentences_list = sentences_list
-
-    def get_sen_states(sen: str):
-        input_ids_padded=convert_sentences_list_to_model_input([sen])
-        with torch.no_grad():
-            outputs = model(**input_ids_padded, output_hidden_states=True)
-        return outputs['hidden_states'],outputs['logits']
-
-
-    def create_same_sen_table(self,num_of_sentences=sys.maxsize):
-        data = {'word1','word2','index1','index2','layer',\
-            'n_examples','sim','std','correct1','correct2',\
-                'logits1_masked','logits1_pred','softmax1_masked','softmax1_pred',
-                'logits2_masked','logits2_pred','softmax2_masked','softmax2_pred',
-                'sim_maskedLM','sim_maskedLM_not_normalize','bertscore_n_m_r','bertscore_n_m_p','bertscore_n_m_f1'\
-                ,'bertscore_m_r','bertscore_m_p','bertscore_m_f1','sen_len1','sen_len2'}
-        for key in data:
-            data[key]=[]
-        values={}
-        sen_list_batch = random.choices(self.sentences_list,k=1000)
-        for i,sen in enumerate(sen_list_batch):
-            c_sen1=sen[:]
-            c_sen2=sen[:]
-            print(f'-------------------------- sentence number: {i} num_of_sentences = {num_of_sentences}-----------------')
-            if num_of_sentences<i:
-                break
-            sen_len = len(sen)
-            pairs_indexes = expirements_utils.generate_k_unique_pairs(sen_len,NUM_OF_MIXES)
-            for j in range(NUM_OF_MIXES):
-                mask_index1,mask_index2=expirements_utils.convert_k_to_pair(pairs_indexes[j])
-                # mask both words:
-                c_sen_mask1,masked_tokenid1=mask_word(c_sen1,int(mask_index1))
-                c_sen_mask2,masked_tokenid2=mask_word(c_sen2,int(mask_index2))
-                states1,logits1=Table_Expirement.get_sen_states(c_sen_mask1)
-                states2,logits2=Table_Expirement.get_sen_states(c_sen_mask2)
-
-                # data for table:
-                values['word1']=sen[mask_index1]
-                values['word2']=sen[mask_index2]
-                values['index1']=mask_index1
-                values['index2']=mask_index2
-                values['n_examples'] = 1
-                values['correct1'] = expirements_utils.check_if_predicted_correct(logits1,mask_index1,masked_tokenid1)
-                values['correct2'] = expirements_utils.check_if_predicted_correct(logits2,mask_index2,masked_tokenid2)
-                
-                values['sen_len1']=sen_len
-                values['sen_len2']=sen_len
-                
-                r,p,f1= expirements_utils.get_bertscore_between_sents(c_sen_mask1,c_sen_mask2)
-                values['bertscore_n_m_r'],values['bertscore_n_m_p'],values['bertscore_n_m_f1'] = (r.mean().item(),p.mean().item(),f1.mean().item()) 
-                # here its identical sentences:
-                values['bertscore_m_r'],values['bertscore_m_p'],values['bertscore_m_f1'] = (1,1,1)
-                values['mean_sim_to_maskedLM'] = -1
-
-                values['sim'] = expirements_utils.get_similarity_between_two_states(states1,states2)
-                values['std'] = 0
-                # logits of two sentences (TODO: split to function):
-                values['logits1_masked']=logits1[0,mask_index1,masked_tokenid1].item()
-                values['predicted_token_id1']=logits1[0,mask_index1].argmax(dim=-1).item()
-                values['logits1_pred']=logits1[0,mask_index1,values['predicted_token_id1']].item()
-                values['softmax1_masked']=torch.softmax(logits1,dim=-1)[0,mask_index1,masked_tokenid1].item()
-                values['softmax1_pred']=torch.softmax(logits1,dim=-1)[0,mask_index1,values['predicted_token_id1']].item()
-
-                values['logits2_masked']=logits2[0,mask_index2,masked_tokenid2].item()
-                values['predicted_token_id2']=logits2[0,mask_index2].argmax(dim=-1).item()
-                values['logits2_pred']=logits2[0,mask_index2,values['predicted_token_id1']].item()
-                values['softmax2_masked']=torch.softmax(logits2,dim=-1)[0,mask_index2,masked_tokenid2].item()
-                values['softmax2_pred']=torch.softmax(logits2,dim=-1)[0,mask_index2,masked_tokenid2].item()
-                for i in range(len(states1)):
-                    for key in data:
-                        if key=='layer':
-                            continue
-                        if key!='sim':
-                            data[key].append(values[key])
-                        else:
-                            data[key].append(values[key][i].item())
-                    data['layer'].append(i)
-            print(f'-------------------------- sentence number: {i} num_of_sentences = {num_of_sentences}-----------------')
-
-        df=pd.DataFrame.from_dict(data)
-        with open('/home/itay.nakash/projects/smooth_language/results/df_same_sen_'+str(num_of_sentences), 'a') as f:
-            dfAsString = df.to_string(header=False, index=False)
-            f.write(dfAsString)
-
-
-
 class SameIndexDiffWord:
 
     def verify_results(values:Dict,pred_correct:Tensor,pred_tensor:Tensor,sen1_index:int,sen2_index:int,mask_index:int,masked_tokenid:int):
@@ -323,7 +231,6 @@ class SameIndexExpiTable:
                     values['index2']=sen2_indx
                     values['n_exampels']=1
                     
-                    #similarity:
                     values['std']=0
                     values['correct1']=pred_correct[int(sen1_indx)].item()
                     values['correct2']=pred_correct[int(sen2_indx)].item()
@@ -360,7 +267,7 @@ class SameIndexExpiTable:
                     values['bertscore_nm_p']=nm_P[i].item()
                     values['bertscore_nm_f1']=nm_F1[i].item()
 
-                    c_sim=expirements_utils.get_similarity_between_two_states(states1,states2)
+                    c_sim=expirements_utils.get_similarity_between_two_states(states1,states2,mask_index)
                     for i in range(len(states)):
                         for key in values:
                             data[key].append(values[key])
@@ -409,7 +316,7 @@ class SameIndexExpiTable:
                         data['correct1_cl_no_norm'].append(expirements_utils.check_if_predicted_correct(state_no_norm1,mask_index,trimed_masked_word))
                         data['correct2_cl_no_norm'].append(expirements_utils.check_if_predicted_correct(state_no_norm2,mask_index,trimed_masked_word))
 
-
+                        # TODO: add the similarity without after head, in same dim:
                     print('---finish pair---')
             print('------------------------- finished word -----------------------')
 

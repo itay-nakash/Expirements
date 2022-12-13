@@ -52,12 +52,13 @@ def get_bertscore_between_sents(sentence1: str, sentence2: str):
     P, R, F1 = bert_score.score(sentence1,sentence2, lang='en', verbose=True)
     return P,R,F1
 
-def get_similarity_between_two_states(states1:Tensor,states2:Tensor):
+def get_similarity_between_two_states(states1:Tensor,states2:Tensor,mask_index:int):
+    mask_index=int(mask_index)
     cos_s=torch.nn.CosineSimilarity(dim=0)
     sims=[]
-    for i,layer1 in enumerate(states1):
-        s1=states1[i][:,:]
-        s2=states2[i][:,:]
+    for i,_ in enumerate(states1):
+        s1=states1[i][mask_index,:]
+        s2=states2[i][mask_index,:]
         res=cos_s(s1,s2)
         sims.append(np.mean(res.cpu().numpy()))
     return tuple(sims)
