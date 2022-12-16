@@ -60,7 +60,8 @@ def get_similarity_between_two_states(states1:Tensor,states2:Tensor,mask_index:i
         s1=states1[i][mask_index,:]
         s2=states2[i][mask_index,:]
         res=cos_s(s1,s2)
-        sims.append(np.mean(res.cpu().numpy()))
+        # TODO: change in the states calc to 'no_grad' I think, and than remove teh detach from here:
+        sims.append(np.mean(res.cpu().detach().numpy()))
     return tuple(sims)
 
 
@@ -133,6 +134,19 @@ def layer_predict_without_norm(state:Tensor):
     output=lm_head_without_norm.forward(state)
     return output
 
+
+lm_norm_org_dim = nn.Sequential(
+    model.lm_head.dense,
+    nn.GELU(),
+    model.lm_head.layer_norm,
+)
+
+def dense_layer_org_dim(states:Tuple[Tensor]):     
+    n_states=[]
+    for state in states:
+        n_states.append(lm_norm_org_dim.forward(state))
+    return tuple(n_states)
+
 def fill_masked_pred_logits_softmax(logits:Tensor,mask_index:int,masked_tokenid:int,sen_indx:int,pred_tensor:Tensor):
     return logits[int(mask_index),masked_tokenid].item(),\
         logits[int(mask_index),pred_tensor[sen_indx]].item(),\
@@ -150,65 +164,60 @@ def fill_masked_pred_logits_softmax(logits:Tensor,mask_index:int,masked_tokenid:
 
 # without layer norm:
 # lm_head.decoder(hidden)
-lm_norm = nn.Sequential(
-    model.lm_head.dense,
-    nn.GELU(),
-    model.lm_head.layer_norm,
-)
 
-def lmHead():
-    res = faiss.StandardGpuResources()  # use a single GPU
-    embeddings = model.roberta.embeddings.word_embeddings.weight
-    N, d = embeddings.shape
-    avoid_tokens = []
-    with torch.no_grad():
-        embeddings = embeddings.detach().clone()
-        # embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
-    #TODO: why it creates a copy of the embedding?
-        for tok in avoid_tokens:
-            embeddings[tok].fill_(0.)
-    index = faiss.IndexFlatIP(d) #TODO: ???
-    # index = faiss.IndexIVFFlat(index, d, 8192, faiss.METRIC_INNER_PRODUCT)#faiss.METRIC_L2)
-    # here we specify METRIC_L2, by default it performs inner-product search
-    gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
-    gpu_index.train(embeddings) # add vectors to the index
-    gpu_index.add(embeddings) # add vectors to the index
-
-def classify_with_lm_head(x, k=1):
-        # logits = model.lm_head(x)
-        x = lm_norm(x)
-        logits = F.linear(x, model.lm_head.decoder.weight, model.lm_head.decoder.bias)
-        return logits.topk(k=k, dim=-1)
-
-def decode_inner_feats(sentence, k=1, index=None, normalize=False, classifier=None):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.eval()
-    inputs = tokenizer(sentence, return_tensors="pt").to(device)
-    outputs = model(**inputs, output_hidden_states=True)
-    decoded = []
-    for layer, state in enumerate(outputs.hidden_states):
-        if index is not None:
-            if normalize:
-                state = lm_norm(state)
-                state = state / state.norm(dim=-1, keepdim=True)
-            D, I = index.search(state.view(-1, d), k)
-            # print(I)
-            # flatten I list of lists
-            for i in range(k):
-                nearest = [item[i] for item in I]
-                decoded.append({
-                    "sentence": tokenizer.decode(nearest),
-                    "distance": sum([d[i] for d in D]) / len(D),
-                    "layer": layer,
-                    'metric': f'{i}-NN'})
-        if classifier is not None:
-            distance, nearest = classifier(state, k=k)
-            for i in range(k):
-                decoded.append({
-                    "sentence": tokenizer.decode(nearest[:, :, i].view(-1)),
-                    "distance": distance[:, :, i].mean().item(),
-                    "layer": layer})
-    return decoded
+#def lmHead():
+#    res = faiss.StandardGpuResources()  # use a single GPU
+#    embeddings = model.roberta.embeddings.word_embeddings.weight
+#    N, d = embeddings.shape
+#    avoid_tokens = []
+#    with torch.no_grad():
+#        embeddings = embeddings.detach().clone()
+#        # embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
+#    #TODO: why it creates a copy of the embedding?
+#        for tok in avoid_tokens:
+#            embeddings[tok].fill_(0.)
+#    index = faiss.IndexFlatIP(d) #TODO: ???
+#    # index = faiss.IndexIVFFlat(index, d, 8192, faiss.METRIC_INNER_PRODUCT)#faiss.METRIC_L2)
+#    # here we specify METRIC_L2, by default it performs inner-product search
+#    gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
+#    gpu_index.train(embeddings) # add vectors to the index
+#    gpu_index.add(embeddings) # add vectors to the index
+#
+#def classify_with_lm_head(x, k=1):
+#        # logits = model.lm_head(x)
+#        x = lm_norm(x)
+#        logits = F.linear(x, model.lm_head.decoder.weight, model.lm_head.decoder.bias)
+#        return logits.topk(k=k, dim=-1)
+#
+#def decode_inner_feats(sentence, k=1, index=None, normalize=False, classifier=None):
+#    device = "cuda" if torch.cuda.is_available() else "cpu"
+#    model.eval()
+#    inputs = tokenizer(sentence, return_tensors="pt").to(device)
+#    outputs = model(**inputs, output_hidden_states=True)
+#    decoded = []
+#    for layer, state in enumerate(outputs.hidden_states):
+#        if index is not None:
+#            if normalize:
+#                state = lm_norm(state)
+#                state = state / state.norm(dim=-1, keepdim=True)
+#            D, I = index.search(state.view(-1, d), k)
+#            # print(I)
+#            # flatten I list of lists
+#            for i in range(k):
+#                nearest = [item[i] for item in I]
+#                decoded.append({
+#                    "sentence": tokenizer.decode(nearest),
+#                    "distance": sum([d[i] for d in D]) / len(D),
+#                    "layer": layer,
+#                    'metric': f'{i}-NN'})
+#        if classifier is not None:
+#            distance, nearest = classifier(state, k=k)
+#            for i in range(k):
+#                decoded.append({
+#                    "sentence": tokenizer.decode(nearest[:, :, i].view(-1)),
+#                    "distance": distance[:, :, i].mean().item(),
+#                    "layer": layer})
+#    return decoded
 
 if __name__ == "__main__":
     #test:

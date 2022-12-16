@@ -14,12 +14,14 @@ from expirements_utils import tokenizer, model, convert_sentences_list_to_model_
 
 from expirements_utils import read_dict_from_json,mask_word,cosine_similarity
 import expirements_utils
+import csv
 
 MIN_NUM_OF_SEN=10
 MAX_BERTSCORE_VALUE = 1
 NUM_OF_MIXES=50
 MAX_SEN_PAIRS=100
 PAIRS_PER_WORD=40
+DEAFULT_MAX_ROWS=10**6
 ''' expirements:
         1. same word, same index (SameIndexExpiTable)
         2. same word, different index
@@ -133,7 +135,7 @@ class SameIndexExpiTable:
             \n sen1 word:{pred_tensor[sen1_index]}\n sen2 pred_c:{pred_tensor[sen2_index]}')
     def create_data_dict():
         keys=['sen1','sen2','sen_len1','sen_len2','word1','word2','index1','index2',
-        'layer', 'n_exampels','sim','std','correct1','correct1_cl','correct1_cl_no_norm','correct2','correct2_cl','correct2_cl_no_norm',
+        'layer', 'n_exampels','sim','sim_lmghead','std','correct1','correct1_cl','correct1_cl_no_norm','correct2','correct2_cl','correct2_cl_no_norm',
         'bertscore_nm_r','bertscore_nm_p','bertscore_nm_f1'
         ,'bertscore_m_r','bertscore_m_p','bertscore_m_f1',
         'logits1_masked', 'logits1_pred','softmax1_masked','softmax1_pred',
@@ -189,15 +191,13 @@ class SameIndexExpiTable:
 
 
 
-    def create_table_from_results(words_dict:Dict ,sentences_list:List,num_of_iter=sys.maxsize,start_at=0):
-        org_num_of_iter=num_of_iter
+    def create_table_from_results(words_dict:Dict ,sentences_list:List,max_rows=DEAFULT_MAX_ROWS,start_at=0):
         data,values = SameIndexExpiTable.create_data_dict()
         for iter,masked_word in enumerate(words_dict):
             trimed_masked_word=masked_word[1:]
             if len(trimed_masked_word)<2 or iter<start_at: # patch 
                 continue
-            num_of_iter-=1
-            if num_of_iter==0:
+            if len(data['sen1'])>max_rows: # a way to limit the run time - do no more than x exampels
                 break
             masked_tokenid = tokenizer.convert_tokens_to_ids(masked_word)
             for mask_index in words_dict[masked_word]:
@@ -267,13 +267,19 @@ class SameIndexExpiTable:
                     values['bertscore_nm_p']=nm_P[i].item()
                     values['bertscore_nm_f1']=nm_F1[i].item()
 
+                    
+
                     c_sim=expirements_utils.get_similarity_between_two_states(states1,states2,mask_index)
+                    states1_orgdim_normed=expirements_utils.dense_layer_org_dim(states1)
+                    states2_orgdim_normed=expirements_utils.dense_layer_org_dim(states2)
+                    c_sim_lmhead = expirements_utils.get_similarity_between_two_states(states1_orgdim_normed,states2_orgdim_normed,mask_index)
                     for i in range(len(states)):
                         for key in values:
                             data[key].append(values[key])
 
                         data['layer'].append(i)
                         data['sim'].append(c_sim[i].item())
+                        data['sim_lmghead'].append(c_sim_lmhead[i].item())
 
                         # collect states information:
                         state_no_norm1=expirements_utils.layer_predict_without_norm(states1[i])
@@ -310,20 +316,22 @@ class SameIndexExpiTable:
                         data['predicted_token2_cl'].append(expirements_utils.get_predicted_token_str(state_with_norm2,mask_index))
                         data['predicted_token2_cl_no_norm'].append(expirements_utils.get_predicted_token_str(state_no_norm2,mask_index))
 
-                        # TODO: make sure it works:
                         data['correct1_cl'].append(expirements_utils.check_if_predicted_correct(state_with_norm1,mask_index,trimed_masked_word))
                         data['correct2_cl'].append(expirements_utils.check_if_predicted_correct(state_with_norm2,mask_index,trimed_masked_word))
                         data['correct1_cl_no_norm'].append(expirements_utils.check_if_predicted_correct(state_no_norm1,mask_index,trimed_masked_word))
                         data['correct2_cl_no_norm'].append(expirements_utils.check_if_predicted_correct(state_no_norm2,mask_index,trimed_masked_word))
 
                         # TODO: add the similarity without after head, in same dim:
+
+
+
+
                     print('---finish pair---')
             print('------------------------- finished word -----------------------')
 
         df = pd.DataFrame(data)
-        df.to_csv('/home/itay.nakash/projects/smooth_language/results/df_same_sen_'+str(org_num_of_iter))
-
-
+        path='/home/itay.nakash/smooth_language/results/SameInedx'
+        df.to_csv(path+str(max_rows)+'.csv')
 
 
 if __name__ == "__main__":
@@ -331,4 +339,4 @@ if __name__ == "__main__":
     word_to_sen=read_dict_from_json('word_to_sen_dict')
     sentences_list=read_dict_from_json('sentences_list')
     
-    SameIndexExpiTable.create_table_from_results(word_to_sen,sentences_list,50,0)
+    SameIndexExpiTable.create_table_from_results(word_to_sen,sentences_list,max_rows=(10**6/2))
